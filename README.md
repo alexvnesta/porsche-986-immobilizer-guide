@@ -82,20 +82,46 @@ Chip: 93C66 (select 8-bit mode, 512 bytes)
 
 | Offset | Length | Description |
 |--------|--------|-------------|
-| 0x000-0x008 | 9 | Header/Unknown |
+| 0x000-0x008 | 9 | Header (may contain partial VIN) |
 | 0x009-0x00E | 6 | ACU Part Number |
-| 0x00F-0x07F | 113 | Configuration Data (mirrored at 0x020 and 0x050) |
+| 0x00F-0x01F | 17 | Vehicle configuration |
+| 0x020-0x04F | 48 | **Configuration Block A** |
+| 0x050-0x07F | 48 | **Configuration Block B** (mirror of A) |
 | 0x080-0x09F | 32 | **OBD Access Control Flags (CRITICAL)** |
-| 0x0A0-0x0AF | 16 | Key Data Region (rolling codes, transponder sync) |
-| 0x0B0-0x0FF | 80 | Transponder IDs and related data |
-| 0x100-0x15F | 96 | Remote Control Slots (4 slots × 24 bytes each) |
+| 0x0A0-0x0B9 | 26 | Key sync/authentication data |
+| 0x0BA-0x0E1 | 40 | **Transponder IDs (4 keys × ~10 bytes, with redundancy)** |
+| 0x0E2-0x0FF | 30 | **Radio Codes - Copy 1 (Keys A, B partial)** |
+| 0x100-0x13B | 60 | **Radio Codes - Primary (Keys B, C, D)** |
+| 0x13C-0x15F | 36 | **Radio Codes - Copy 2 (Keys C, D) + markers** |
 | 0x160-0x1AF | 80 | Zeros (unused) |
-| 0x1B0-0x1BF | 16 | Counter/Sync Region |
+| 0x1B0-0x1BF | 16 | Counter/Sync Region (B2 22 D4 pattern) |
 | 0x1C0-0x1ED | 46 | Zeros (unused) |
 | 0x1EE-0x1F0 | 3 | **PIN/Key Learning Code (1st copy)** |
 | 0x1F1-0x1F6 | 6 | Additional codes/checksums |
 | 0x1F7-0x1F9 | 3 | **PIN/Key Learning Code (2nd copy)** |
 | 0x1FA-0x1FF | 6 | Additional codes/checksums |
+
+### Key Slot Structure
+
+The ACU stores data for **4 keys (A, B, C, D)**. Each key has:
+1. **Transponder ID** (4 bytes) - stored in 0x0BA-0x0E1 region
+2. **Radio Code** (4 bytes minimum) - stored **twice** for redundancy
+
+| Key | Transponder ID Offset | Radio Code Copy 1 | Radio Code Copy 2 |
+|-----|----------------------|-------------------|-------------------|
+| A | 0x0BA-0x0BD | 0x0E2-0x0E5 | 0x0F7-0x0FA |
+| B | 0x0BF-0x0C2 | 0x100-0x103 | 0x115-0x118 |
+| C | 0x0C4-0x0C7 | 0x11E-0x121 | 0x133-0x136 |
+| D | 0x0C9-0x0CC | 0x13C-0x13F | 0x151-0x154 |
+
+**Example (Key B programmed, Key D empty):**
+```
+Key B Transponder: 94 9A 5F 02 (at 0x0BF)
+Key B Radio Code:  40 01 4F 13 (at 0x100 and 0x115)
+
+Key D Transponder: CE 56 E9 1D (at 0x0C9)
+Key D Radio Code:  FF FF FF FF (EMPTY - at 0x13C and 0x151)
+```
 
 ### Annotated Hex Dump
 
@@ -138,38 +164,53 @@ Below is an actual 986 Boxster ACU EEPROM dump (512 bytes) with critical regions
 000000a0: 3d0a 7677 7674 0474 742a 7777 7777 7777  =.vwvt.tt*wwwwww
 
                           ┌─────────────────────────────────────────────────────────────────┐
-                          │              TRANSPONDER IDs (0x0B0-0x0FF)                      │
-                          │         ID48 chip identifiers for each programmed key          │
+                          │           TRANSPONDER IDs & KEY DATA (0x0B0-0x0E1)              │
+                          │              ID48 chip identifiers for 4 keys                   │
                           └─────────────────────────────────────────────────────────────────┘
-000000b0: 7777 7777 7777|30c0 2f00|944c 1072 bfff  wwwwww0./..L.r..
-                        └────────┘
-                        Transponder ID (Key 1)
+000000b0: 8e85 d163 8e8e 0f00 0000|2569 a108|df94  ...c......%i....
+                                   └────────┘
+                                   Key A Transponder ID
 
-000000c0: ffff ff78 ffff ffff 78ff ffff ff78|944c  ...x....x....x.L
-000000d0: 1072 bf|ff ffff ff78 ffff ffff 78ff ffff  .r.....x....x...
-          └─────┘
-          Transponder ID (Key 2 - same as Key 1 in this dump)
+000000c0:|9a5f 0222|16ed 6003|ecce 56e9 1db1|2569  ._."..`...V...%i
+          └───────┘ └───────┘ └──────────────┘
+          Key B ID   Key C ID  Key D ID (+ redundancy)
 
-000000e0: ff78 ffff ffff ffff ffff|b7|ff ffff ffff  .x..............
-000000f0:|06|ff ffff ffff|06|ff ffff ffff ffff ff|b7|  ................
-          └┘            └┘                      └┘
-          Empty slot markers (B7 and 06 indicate unprogrammed)
+000000d0: a108 df94 9a5f 0222 16ed 6003 ecce 56e9  ....._."..`...V.
+000000e0: 1db1|4001 4bf8|a499 fc25 3209 8261 57be  .@.K....%2..aW.
+          └──┘ └───────┘
+          end  Key A Radio Code (Copy 1)
 
                           ┌─────────────────────────────────────────────────────────────────┐
-                          │              REMOTE CONTROL SLOTS (0x100-0x15F)                 │
-                          │                 4 slots × 24 bytes each                         │
-                          │        FF bytes with B7/06 markers = EMPTY/UNPROGRAMMED         │
+                          │              RADIO CODES - KEYS A & B (0x0E2-0x11D)             │
+                          │           Each code stored twice for redundancy                 │
                           └─────────────────────────────────────────────────────────────────┘
-          ┌── Remote Slot 1 (EMPTY) ──────────────────────────────────────┐
-00000100: ffff ffff ffff ffff|b7|ff ffff ffff|06|ff  ................
-00000110: ffff ffff|06|ff ffff ffff ffff ff|b7|ffff  ................
-          └── Remote Slot 2 (EMPTY) ──────────────────────────────────────┘
-00000120: ffff ffff ffff|b7|ff ffff ffff|06|ff ffff  ................
-00000130: ffff|06|ff ffff ffff ffff ff|b7|ffff ffff  ................
-          └── Remote Slot 3 (EMPTY) ──────────────────────────────────────┘
+000000f0: 000f 2253 0117 65|40 014b f8|a4 99fc 2532  .."S..e@.K....%2
+                           └───────┘
+                           Key A Radio Code (Copy 2)
+
+00000100:|4001 4f13|061e 415f c604 0fae 96e1 c90f  @.O...A_........
+          └───────┘
+          Key B Radio Code (Copy 1: 40 01 4F 13)
+
+00000110: 3f98 add2 9c|40 014f 13|06 1e41 5fc6|4016  ?....@.O...A_.@.
+                      └───────┘              └────
+                      Key B Radio Code (Copy 2)   Key C starts
+
+                          ┌─────────────────────────────────────────────────────────────────┐
+                          │              RADIO CODES - KEYS C & D (0x11E-0x159)             │
+                          └─────────────────────────────────────────────────────────────────┘
+00000120:|c29a|e1d9 eaf3 b01c 7be3 b8c6 090d 79fd  ..........{...y.
+          └──┘
+          Key C Radio Code (Copy 1: 40 16 C2 9A)
+
+00000130: 492f 06|40 16c2 9a|e1 d9ea f3b0|ffff ffff  I/.@.........
+                 └───────┘              └─────────
+                 Key C Radio (Copy 2)   Key D (EMPTY)
+
 00000140: ffff ffff|b7|ff ffff ffff|06|ff ffff ffff  ................
-00000150:|06|ff ffff ffff ffff ff|b7|0000 0000 0000  ................
-          └── Remote Slot 4 (EMPTY) ──┘
+00000150:|06|ff|ffff ffff ffff ff|b7|00 0000 0000 00  ................
+               └──────────────┘
+               Key D Radio Code (Copy 2: FF = EMPTY)
 
                           ┌─────────────────────────────────────────────────────────────────┐
                           │                   UNUSED REGION (0x160-0x1AF)                   │
@@ -208,11 +249,17 @@ Below is an actual 986 Boxster ACU EEPROM dump (512 bytes) with critical regions
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
 │  LEGEND                                                                                 │
 ├─────────────────────────────────────────────────────────────────────────────────────────┤
-│  PIN CODE:        DC 4E 40  (3 bytes, stored twice for redundancy)                      │
-│  PART NUMBER:     996.618.260.07  (decoded from 99 66 18 26 00 70)                      │
-│  TRANSPONDER:     94 4C 10 72  (ID48 chip identifier)                                   │
-│  REMOTE SLOTS:    All empty (FF with B7/06 markers)                                     │
+│  PIN CODE:        4C 02 E3  (3 bytes at 0x1EE & 0x1F7, stored twice)                    │
+│  PART NUMBER:     996.618.260.05  (decoded from 99 66 18 26 00 50)                      │
+│  OBD FLAGS:       00 00 55 ... 55 75  (LOCKED - needs F6 0A to unlock)                  │
+│                                                                                         │
+│  KEY A:  Transponder 25 69 A1 08 | Radio 40 01 4B F8                                    │
+│  KEY B:  Transponder 94 9A 5F 02 | Radio 40 01 4F 13  ← "key I have"                    │
+│  KEY C:  Transponder 16 ED 60 03 | Radio 40 16 C2 9A                                    │
+│  KEY D:  Transponder CE 56 E9 1D | Radio FF FF FF FF  (EMPTY)                           │
+│                                                                                         │
 │  SYNC PATTERN:    B2 22 D4  (rolling code synchronization)                              │
+│  EMPTY MARKERS:   B7 and 06 bytes indicate unprogrammed slots                           │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
