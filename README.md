@@ -84,8 +84,9 @@ Chip: 93C66 (select 8-bit mode, 512 bytes)
 |--------|--------|-------------|
 | 0x000-0x008 | 9 | Header/Unknown |
 | 0x009-0x00E | 6 | ACU Part Number |
-| 0x00F-0x08F | 129 | Configuration Data (repeated at 0x020 and 0x050) |
-| 0x090-0x0AF | 32 | Key Data Region (rolling codes, transponder sync) |
+| 0x00F-0x07F | 113 | Configuration Data (mirrored at 0x020 and 0x050) |
+| 0x080-0x09F | 32 | **OBD Access Control Flags (CRITICAL)** |
+| 0x0A0-0x0AF | 16 | Key Data Region (rolling codes, transponder sync) |
 | 0x0B0-0x0FF | 80 | Transponder IDs and related data |
 | 0x100-0x15F | 96 | Remote Control Slots (4 slots × 24 bytes each) |
 | 0x160-0x1AF | 80 | Zeros (unused) |
@@ -125,9 +126,14 @@ Below is an actual 986 Boxster ACU EEPROM dump (512 bytes) with critical regions
 00000070: ed08 000a 0000 0000 0000 0000 0000 0000  ................
 
                           ┌─────────────────────────────────────────────────────────────────┐
-                          │               KEY DATA & ROLLING CODES (0x080-0x0AF)            │
+                          │      ★★★ OBD ACCESS CONTROL FLAGS (0x080-0x09F) ★★★             │
+                          │         Controls whether OBD programming is allowed             │
                           └─────────────────────────────────────────────────────────────────┘
-00000080: 0000 5500 0055 7500 0030 3007 0101 0000  ..U..Uu..00.....
+00000080:|0000 55|00|0055 75|00 0030 3007 0101 0000  ..U..Uu..00.....
+          └─────┘  └──────┘
+          OBD Flag 1    OBD Flag 2
+          (00 00 = locked, F6 0A = unlocked)
+
 00000090: 3a81 05ad 2d82 2f87 3101 3c83 030a 0c09  :...-./.1.<.....
 000000a0: 3d0a 7677 7674 0474 742a 7777 7777 7777  =.vwvt.tt*wwwwww
 
@@ -208,6 +214,39 @@ Below is an actual 986 Boxster ACU EEPROM dump (512 bytes) with critical regions
 │  REMOTE SLOTS:    All empty (FF with B7/06 markers)                                     │
 │  SYNC PATTERN:    B2 22 D4  (rolling code synchronization)                              │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Byte-Swapping (16-bit EEPROM)
+
+The 93LC66 is a **16-bit organized** EEPROM. Each memory address holds a 16-bit word (2 bytes). When dumped byte-by-byte, the order depends on how the programmer reads it out:
+
+```
+How Porsche stores data:    [High Byte][Low Byte]
+How raw dump appears:       [Low Byte][High Byte]
+```
+
+**To read codes correctly, swap each adjacent byte pair:**
+
+| Data Type | Raw Dump | Byte-Swapped (Correct) |
+|-----------|----------|------------------------|
+| PIN Code | `D8 18 87 39...` | `18 D8 39 87...` → PIN is `18 D8 87` |
+| Remote Code | `13 40 89 A9 4C D1...` | `40 13 A9 89 D1 4C...` |
+
+**When to swap:**
+
+| Operation | Swap Needed? | Reason |
+|-----------|--------------|--------|
+| Read PIN/remote codes | **Yes** - swap to read | See human-readable values |
+| Write new remote code | **Yes** - swap before writing | Module expects swapped format |
+| Write unlock flag (`F6 0A`) | **No** | It's a known raw constant |
+
+**Example: Writing a new remote code**
+
+If your remote barcode reads `40 13 A9 89 D1 4C 23 2D BF 06 B7 C5`, write this to the raw dump:
+
+```
+Barcode (human-readable):  40 13 A9 89 D1 4C 23 2D BF 06 B7 C5
+Write to EEPROM (swapped):  13 40 89 A9 4C D1 2D 23 06 BF C5 B7
 ```
 
 ### Part Number Decoding (0x009-0x00E)
@@ -327,13 +366,43 @@ ABRITES can:
 
 ### Enabling OBD Programming Access
 
-Some ACUs have OBD programming access disabled. ABRITES has a function called "Enable Alarm module access by OBD2" that modifies specific EEPROM bytes.
+Some ACUs have OBD programming access disabled. This is an anti-theft feature - even with the correct PIN, the module refuses programming commands over OBD-II.
 
-If PIWIS reports "No access authorization", you may need to:
-1. Read EEPROM
-2. Use ABRITES Dump Tool to modify for OBD access
-3. Write modified EEPROM back
-4. Retry PIWIS programming
+#### OBD Access Control Flags (0x080-0x084)
+
+The module checks bytes at offset 0x80-0x84 on startup:
+
+| State | Bytes at 0x80-0x81 | Bytes at 0x83-0x84 | Result |
+|-------|-------------------|-------------------|--------|
+| **Locked** | `00 00` or `55 55` | `00 00` or `55 55` | OBD programming **blocked** |
+| **Unlocked** | `F6 0A` | `F6 0A` | OBD programming **allowed** |
+
+The firmware logic is essentially:
+```c
+if (eeprom[0x80] == 0xF6 && eeprom[0x81] == 0x0A &&
+    eeprom[0x83] == 0xF6 && eeprom[0x84] == 0x0A) {
+    allow_obd_programming = true;
+}
+```
+
+The flag is stored twice for redundancy - if one copy gets corrupted, the check fails.
+
+#### To Unlock OBD Access:
+
+1. Read EEPROM from ACU
+2. Modify bytes at 0x80-0x84:
+   ```
+   Original: 00 00 00 55 55 ...  (or similar locked state)
+   Modified: F6 0A 00 F6 0A ...
+   ```
+3. Write modified EEPROM back to ACU
+4. PIWIS/diagnostic tools can now program keys and remotes
+
+**Note:** The unlock bytes `F6 0A` are written in raw format (no byte-swapping needed).
+
+#### Why This Exists
+
+This is an anti-theft measure. If someone steals your car and plugs in a diagnostic tool, they cannot simply program a new key - the module refuses. Physical access to the EEPROM is required to enable service mode first.
 
 ## Tools Required
 

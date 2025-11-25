@@ -7,12 +7,22 @@ Usage:
     python3 program_remote.py <input.bin> <output.bin> <slot> <24-char-code>
 
 Example:
-    python3 program_remote.py my_eeprom.bin modified.bin 1 40059050236E317F2918D821
+    python3 program_remote.py my_eeprom.bin modified.bin 1 4013A989D14C232DBF06B7C5
 
 The 24-character code comes from the barcode tag on your new remote PCB.
 Each remote has a unique code that must be programmed to the ACU.
 
-Repository: https://github.com/YOUR_USERNAME/porsche-986-immobilizer-guide
+IMPORTANT - Byte Swapping:
+    The 93LC66 EEPROM uses 16-bit word organization. This script automatically
+    byte-swaps the code before writing so you can enter it exactly as shown
+    on the barcode label.
+
+    Barcode shows:     40 13 A9 89 D1 4C 23 2D BF 06 B7 C5
+    Written to EEPROM: 13 40 89 A9 4C D1 2D 23 06 BF C5 B7
+
+    Use --no-swap if your code is already in EEPROM format.
+
+Repository: https://github.com/alexvnesta/porsche-986-immobilizer-guide
 """
 
 import sys
@@ -20,10 +30,29 @@ import os
 import argparse
 
 
+def swap_bytes(data):
+    """
+    Swap adjacent byte pairs for 16-bit EEPROM format.
+
+    The 93LC66 is a 16-bit organized EEPROM. When reading/writing codes,
+    each byte pair needs to be swapped:
+        Input:  40 13 A9 89 D1 4C ...
+        Output: 13 40 89 A9 4C D1 ...
+    """
+    result = bytearray(len(data))
+    for i in range(0, len(data) - 1, 2):
+        result[i] = data[i + 1]
+        result[i + 1] = data[i]
+    # Handle odd length (shouldn't happen with 12-byte codes)
+    if len(data) % 2:
+        result[-1] = data[-1]
+    return bytes(result)
+
+
 def parse_hex_code(hex_string):
     """
     Parse a 24-character hex string into 12 bytes.
-    
+
     Accepts formats:
         40059050236E317F2918D821
         40 05 90 50 23 6E 31 7F 29 18 D8 21
@@ -31,13 +60,13 @@ def parse_hex_code(hex_string):
     """
     # Remove spaces, dashes, colons, and other separators
     hex_clean = hex_string.replace(' ', '').replace('-', '').replace(':', '').replace('.', '').upper()
-    
+
     if len(hex_clean) != 24:
         raise ValueError(
             f"Code must be exactly 24 hex characters (12 bytes).\n"
             f"Got {len(hex_clean)} characters: '{hex_clean}'"
         )
-    
+
     # Validate all characters are hex
     try:
         return bytes.fromhex(hex_clean)
@@ -91,29 +120,38 @@ def verify_eeprom(data):
     return issues
 
 
-def program_remote(input_file, output_file, slot_num, hex_code, force=False):
+def program_remote(input_file, output_file, slot_num, hex_code, force=False, no_swap=False):
     """Program a remote code into an EEPROM dump."""
-    
+
     # Parse the hex code
     remote_code = parse_hex_code(hex_code)
-    
+
     # Read the input file
     with open(input_file, 'rb') as f:
         data = bytearray(f.read())
-    
+
     # Verify EEPROM
     issues = verify_eeprom(data)
     if issues and not force:
-        print("⚠ EEPROM verification warnings:")
+        print("Warning: EEPROM verification warnings:")
         for issue in issues:
             print(f"  - {issue}")
         print("\nUse --force to proceed anyway")
         return False
-    
+
     # Get slot offset
     offset = get_slot_offset(slot_num)
-    
-    print(f"Remote code (12 bytes): {' '.join(f'{b:02X}' for b in remote_code)}")
+
+    print(f"Remote code from barcode: {' '.join(f'{b:02X}' for b in remote_code)}")
+
+    # Byte-swap for 16-bit EEPROM format (unless --no-swap specified)
+    if no_swap:
+        swapped_code = remote_code
+        print(f"Writing code as-is (--no-swap): {' '.join(f'{b:02X}' for b in swapped_code)}")
+    else:
+        swapped_code = swap_bytes(remote_code)
+        print(f"Byte-swapped for EEPROM:  {' '.join(f'{b:02X}' for b in swapped_code)}")
+
     print(f"Writing to slot {slot_num} at offset 0x{offset:03X}")
     
     # Show before state
@@ -132,8 +170,8 @@ def program_remote(input_file, output_file, slot_num, hex_code, force=False):
                 print("Aborted.")
                 return False
     
-    # Write the 12-byte remote code
-    data[offset:offset+12] = remote_code
+    # Write the 12-byte remote code (byte-swapped)
+    data[offset:offset+12] = swapped_code
     
     # Show after state
     print(f"\nAFTER (0x{offset:03X}-0x{offset+15:03X}):")
@@ -166,17 +204,21 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Program remote to slot 1
-    python3 program_remote.py original.bin modified.bin 1 40059050236E317F2918D821
-    
+    # Program remote to slot 1 (code is auto byte-swapped)
+    python3 program_remote.py original.bin modified.bin 1 4013A989D14C232DBF06B7C5
+
     # Program with spaces in code
-    python3 program_remote.py original.bin modified.bin 1 "40 05 90 50 23 6E 31 7F 29 18 D8 21"
-    
+    python3 program_remote.py original.bin modified.bin 1 "40 13 A9 89 D1 4C 23 2D BF 06 B7 C5"
+
     # Force overwrite existing slot
-    python3 program_remote.py original.bin modified.bin 1 40059050236E317F2918D821 --force
+    python3 program_remote.py original.bin modified.bin 1 4013A989D14C232DBF06B7C5 --force
+
+    # Skip byte-swap (if code is already in EEPROM format)
+    python3 program_remote.py original.bin modified.bin 1 1340A989... --no-swap
 
 Notes:
-    - The 24-character code comes from the barcode tag on your new remote
+    - Enter the code exactly as shown on the barcode tag - it will be byte-swapped automatically
+    - The 93LC66 uses 16-bit words, so each byte pair is reversed in the raw dump
     - Slot 1 is at offset 0x100, Slot 2 at 0x10C, Slot 3 at 0x118, Slot 4 at 0x124
     - Always keep a backup of your original EEPROM!
     - After modifying, flash the EEPROM back to your ACU using CH341A or similar
@@ -187,7 +229,9 @@ Notes:
     parser.add_argument('slot', type=int, choices=[1, 2, 3, 4], help='Remote slot (1-4)')
     parser.add_argument('code', help='24-character hex code from remote barcode')
     parser.add_argument('--force', '-f', action='store_true', help='Force operation, skip confirmations')
-    
+    parser.add_argument('--no-swap', action='store_true',
+                        help='Do NOT byte-swap the code (use if code is already in EEPROM format)')
+
     args = parser.parse_args()
     
     if not os.path.exists(args.input):
@@ -204,7 +248,7 @@ Notes:
     print("=" * 60)
     
     try:
-        success = program_remote(args.input, args.output, args.slot, args.code, args.force)
+        success = program_remote(args.input, args.output, args.slot, args.code, args.force, args.no_swap)
         
         if success:
             print("\n" + "=" * 60)
