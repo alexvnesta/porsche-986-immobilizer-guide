@@ -43,9 +43,9 @@ Offset      Size    Description
 0x1C0-0x1ED   46    Unused (zeros)
 
 0x1EE-0x1F0    3    ★ PIN CODE (Copy 1) ★
-0x1F1-0x1F6    6    Checksums / additional codes
+0x1F1-0x1F6    6    ★ ECU PAIRING CODE (Copy 1) ★
 0x1F7-0x1F9    3    ★ PIN CODE (Copy 2) ★
-0x1FA-0x1FF    6    Checksums / additional codes
+0x1FA-0x1FF    6    ★ ECU PAIRING CODE (Copy 2) ★
 ──────────────────────────────────────────────────────────────────
 ```
 
@@ -178,6 +178,41 @@ The 3-byte PIN is stored **twice** for redundancy:
 All analyzed dumps show: `B2 22 D4 B2 22 D4`
 
 This pattern is related to rolling code synchronization.
+
+## IPAS Codes Explained
+
+Porsche dealers have access to IPAS (Integrated Porsche Aftersales System) which stores various codes by VIN. Here's how they relate to EEPROM data:
+
+| IPAS Code Name | Digits | Source | EEPROM Location |
+|----------------|--------|--------|-----------------|
+| **Key Learning Code (PAS-Code)** | 6 hex | ACU | `0x1EE-0x1F0` (PIN) |
+| **Alarm Learning Code** | 12 hex | ACU | `0x1F1-0x1F6` (ECU Pairing) |
+| **DME Programming Code** | 6 hex | ECU | In DME EEPROM, not ACU |
+| **Immobilizer Code** | 16 hex | Both | Combined ACU + ECU pairing data |
+| **Remote Transmitter Code** | 24 hex | Key card | `0x100+` (12 bytes per slot) |
+
+### What Each Code Does
+
+- **Key Learning Code (PIN)**: Required to enter programming mode via PIWIS/PST2
+- **Alarm Learning Code**: Links ACU to vehicle - needed when replacing ACU
+- **DME Programming Code**: Required for ECU replacement/flashing
+- **Immobilizer Code**: The full secret linking ACU↔ECU - prevents module swapping
+- **Remote Transmitter Code**: From barcode on key - programs lock/unlock function
+
+### Extracting Codes from EEPROM
+
+```bash
+# Key Learning Code (PIN) - 3 bytes = 6 hex digits
+xxd -s 0x1EE -l 3 -p dump.bin
+
+# Alarm Learning Code (ECU Pairing) - 6 bytes = 12 hex digits
+xxd -s 0x1F1 -l 6 -p dump.bin
+
+# First Remote Code - 12 bytes = 24 hex digits
+xxd -s 0x100 -l 12 -p dump.bin
+```
+
+**Note:** Remote codes are NOT stored in IPAS after initial sale. If you lose the barcode tag from your key, the code cannot be recovered from Porsche - only from the EEPROM itself.
 
 ## Byte-Swapping (16-bit EEPROM)
 

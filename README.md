@@ -71,10 +71,18 @@ Chip: 93C66 (select 8-bit mode, 512 bytes)
 
 ### Key Fob Hardware
 
-- **Transponder:** ID48 (Megamos Crypto)
-- **Remote Chip:** Microchip-based (suspected Keeloq variant)
-- **Frequencies:** 315 MHz (USA) or 433 MHz (EU)
+- **Transponder:** ID48 (Megamos Crypto) - glass pill component
+- **Remote Board:** 4 generations (P1, P2, P3, P4) across production years
+- **Frequencies:** 315 MHz (USA/Japan) or 433.92 MHz (EU/ROW)
 - **Battery:** CR2016
+- **Rolling Code:** Encrypted, ~40 button presses max before desync
+
+### Key Slot Allocation
+
+The M534/M535 has **4 total slots** for keys:
+- Factory default: 3 transponder slots + 2 remote slots
+- Maximum: 4 of each (transponder and remote)
+- Each remote has its own code card (required for programming)
 
 ## EEPROM Structure
 
@@ -527,11 +535,40 @@ This is an anti-theft measure. If someone steals your car and plugs in a diagnos
 
 The 986/996 uses a challenge-response rolling code system. If remote gets too far out of sync (~40 button presses), it cannot be recovered without reprogramming.
 
+### Remote Locked Out (Play Protection)
+
+If you press the remote buttons rapidly many times, the system locks out for ~60 seconds as an anti-tampering measure. Wait and try again.
+
+### Remote LED Diagnostics
+
+| LED Behavior | Meaning |
+|--------------|---------|
+| Rapid continuous blink | Normal operation |
+| Rhythmic 2-3 pulses on button press | Normal |
+| Slow blink (~1/sec) | **Processor failure - irreversible** |
+| LED stays on with ignition | System defect |
+
+### Power-Saving Mode (No Remote Response)
+
+After ~120 hours (5 days) without ignition activation, the ACU disables the RF receiver to save battery. The remote won't work but mechanical key entry still functions. **Fix:** Turn ignition key to re-enable receiver.
+
+### Horn Beeps When Locking
+
+| Beeps | Meaning |
+|-------|---------|
+| 1 honk | A monitored component is open (door, hood, glovebox, center console) |
+| 2 honks | ACU malfunction |
+
+### All Keys Stop Working (Transponder)
+
+If NO keys start the car (not just remote, but turning ignition), this indicates ACU failure - the transponder recognition circuit has failed. Requires ACU repair or replacement.
+
 ## Resources
 
 ### Online References
 
 - [bdm310/996-Immobilizer GitHub](https://github.com/bdm310/996-Immobilizer) - **Original reverse engineering work** (PIN locations, part number decoding, hardware details)
+- [Sportwagendoktor FAQ (German)](https://sportwagendoktor.de/faq/faq-porsche-986-996-980/) - Excellent technical FAQ on keys, alarm modules, and programming
 - [JMG Porsche Alarm Primer](https://www.jmgporsche.co.uk/index.php/sales-maintenance/item/234-996-986-alarm-primer) - Comprehensive technical overview
 - [Digital Kaos Forum](https://www.digital-kaos.co.uk/forums/) - Locksmith community, OBD unlock help
 - [MHH Auto Forum](https://mhhauto.com/) - EEPROM dumps and immo discussions
@@ -541,6 +578,7 @@ The 986/996 uses a challenge-response rolling code system. If remote gets too fa
 
 ### Service Providers
 
+- **Sportwagendoktor (Germany)** - ACU repair, frequency conversion, key programming
 - **JMG Porsche (UK)** - Remote programming, ACU repair, code extraction
 - **ECU Doctors (USA)** - ACU exchange, remote sales with barcodes
 - **FobFix (UK)** - Remote refurbishment, barcode recreation
