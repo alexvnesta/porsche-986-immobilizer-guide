@@ -287,13 +287,37 @@ Some ACUs have OBD programming disabled. If PIWIS shows "No access authorization
 
 ### Manual Method (Advanced)
 
-The exact bytes that control OBD access are in the configuration region. Comparing a "locked" and "unlocked" dump reveals the differences.
+The OBD unlock requires modifying **THREE regions** (39 bytes total):
 
-Known modification areas:
-- Bytes around 0x010-0x020
-- Configuration flags in header region
+#### Region 1: OBD Flags (0x080-0x08F)
+```
+Locked:   00 00 00 55 55 00 50 75 30 50 03 30 00 05 00 00
+Unlocked: F6 0A 00 F6 0A 00 75 00 00 30 30 01 03 02 00 00
+```
 
-**TODO:** Document exact bytes from ABRITES comparison
+#### Region 2: Authentication Bypass (0x0A0-0x0AF)
+```
+Locked:   00 00 7A 7A 75 7A 75 73 75 75 7A 7A 00 00 00 00
+Unlocked: 00 00 8B 3B 3B 3B 3B EB 3B 3B E6 3B 64 A0 A0 3D
+```
+
+#### Region 3: Additional Unlock (0x0B0-0x0B6)
+```
+Locked:   00 00 00 00 00 00 4C
+Unlocked: 3D 85 E5 E5 E5 63 0C
+```
+
+**These values are UNIVERSAL** - confirmed identical across multiple unlocked dumps from different sources (ABRITES, Digital Kaos forum, YouTube).
+
+#### Complete Unlock Patch
+Write these bytes to your EEPROM:
+```
+0x080: F6 0A 00 F6 0A 00 75 00 00 30 30 01 03 02 00 00
+0x0A0: 00 00 8B 3B 3B 3B 3B EB 3B 3B E6 3B 64 A0 A0 3D
+0x0B0: 3D 85 E5 E5 E5 63 0C
+```
+
+**WARNING:** Always backup your original EEPROM first!
 
 ---
 

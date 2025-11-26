@@ -42,12 +42,43 @@ def analyze_pin(data):
     """Extract PIN/Key Learning Code from 0x1EE and 0x1F7."""
     if len(data) < 0x1FA:
         return None, None, False
-    
+
     pin1 = data[0x1EE:0x1F1]
     pin2 = data[0x1F7:0x1FA]
     match = (pin1 == pin2)
-    
+
     return pin1, pin2, match
+
+
+def analyze_ecu_pairing(data):
+    """Extract ECU pairing code from 0x1F1 and 0x1FA."""
+    if len(data) < 0x200:
+        return None, None, False
+
+    pairing1 = data[0x1F1:0x1F7]
+    pairing2 = data[0x1FA:0x200]
+    match = (pairing1 == pairing2)
+
+    return pairing1, pairing2, match
+
+
+def analyze_obd_status(data):
+    """Check if OBD programming access is enabled."""
+    if len(data) < 0x086:
+        return "Unknown (data too short)"
+
+    # Check for the F6 0A unlock pattern at 0x080 and 0x083
+    flag1 = data[0x080:0x082]
+    flag2 = data[0x083:0x085]
+
+    unlocked_pattern = bytes([0xF6, 0x0A])
+
+    if flag1 == unlocked_pattern and flag2 == unlocked_pattern:
+        return "UNLOCKED (OBD programming enabled)"
+    elif flag1 == bytes([0x00, 0x00]) or flag2 == bytes([0x55, 0x55]):
+        return "LOCKED (OBD programming disabled)"
+    else:
+        return f"UNKNOWN (flags: {flag1.hex()} / {flag2.hex()})"
 
 
 def analyze_remote_slot(data, slot_num):
@@ -104,6 +135,12 @@ def print_analysis(filepath):
     print("-" * 40)
     print(f"  {analyze_part_number(data)}")
     
+    # OBD Status
+    print("\n[OBD PROGRAMMING STATUS]")
+    print("-" * 40)
+    obd_status = analyze_obd_status(data)
+    print(f"  {obd_status}")
+
     # PIN Code
     print("\n[PIN / KEY LEARNING CODE]")
     print("-" * 40)
@@ -116,6 +153,19 @@ def print_analysis(filepath):
             print(f"\n  >>> YOUR PIN: {' '.join(f'{b:02X}' for b in pin1)} <<<")
         else:
             print(f"\n  ⚠ WARNING: PIN codes do NOT match!")
+
+    # ECU Pairing Code
+    print("\n[ECU PAIRING CODE (Alarm Learning Code)]")
+    print("-" * 40)
+    pairing1, pairing2, pairing_match = analyze_ecu_pairing(data)
+    if pairing1:
+        print(f"  Location 0x1F1: {' '.join(f'{b:02X}' for b in pairing1)}")
+        print(f"  Location 0x1FA: {' '.join(f'{b:02X}' for b in pairing2)}")
+        if pairing_match:
+            print(f"\n  ✓ Pairing codes match")
+            print(f"\n  >>> ECU PAIRING: {' '.join(f'{b:02X}' for b in pairing1)} <<<")
+        else:
+            print(f"\n  ⚠ WARNING: Pairing codes do NOT match!")
     
     # Remote Slots
     print("\n[REMOTE CONTROL SLOTS] (0x100-0x13F)")
@@ -209,15 +259,23 @@ def compare_dumps(file1, file2):
             # Determine region
             if 0x009 <= offset <= 0x00E:
                 region = "Part Number"
+            elif 0x080 <= offset <= 0x08F:
+                region = "OBD Flags ★"
+            elif 0x0A0 <= offset <= 0x0AF:
+                region = "Auth Bypass ★"
+            elif 0x0B0 <= offset <= 0x0B6:
+                region = "Unlock Data ★"
             elif 0x100 <= offset <= 0x15F:
                 region = "Remote Slots"
             elif 0x1EE <= offset <= 0x1F0 or 0x1F7 <= offset <= 0x1F9:
                 region = "PIN Code"
+            elif 0x1F1 <= offset <= 0x1F6 or 0x1FA <= offset <= 0x1FF:
+                region = "ECU Pairing"
             elif 0x1B0 <= offset <= 0x1BF:
                 region = "Sync Region"
-            elif 0x090 <= offset <= 0x0AF:
+            elif 0x090 <= offset <= 0x09F:
                 region = "Key Data"
-            elif 0x0B0 <= offset <= 0x0FF:
+            elif 0x0B7 <= offset <= 0x0FF:
                 region = "Transponder"
             else:
                 region = ""
