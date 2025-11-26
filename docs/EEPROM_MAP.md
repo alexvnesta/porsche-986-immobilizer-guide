@@ -276,10 +276,12 @@ Junkyard:   19 B2
 - Values may be calculated per-module or could be universal
 - **Need:** Multiple unlock examples to determine if values are fixed
 
-### Radio Code Full Length
-- Barcodes may show 4 bytes (8 hex chars) or 12 bytes (24 hex chars)
-- EEPROM stores more than 4 bytes per slot
-- **Need:** Physical barcode photo to confirm format
+### ~~Radio Code Full Length~~ RESOLVED
+Barcode confirmed to show **12 bytes (24 hex characters)**:
+```
+40 17 52 3C D1 7E A3 A3 19 2A 27 E4
+```
+From label on new remote PCB (996.637.244.17)
 
 ### Checksums
 - No obvious checksum algorithm identified

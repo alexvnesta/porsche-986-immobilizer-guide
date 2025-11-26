@@ -313,7 +313,15 @@ The `B7` and `06` bytes are markers in the unprogrammed state.
       |<-------- 12-byte remote code -------->| |extra|
 ```
 
-The 12-byte code comes from the barcode tag on new remotes (shown as 24 hex characters).
+The 12-byte code comes from the barcode label on new remote PCBs:
+
+```
+Remote Part Number: 996.637.244.17
+Barcode: *40 17 52 3C D1 7E A3 A3 19 2A 27 E4*
+          |<------ 12 bytes (24 hex chars) ------>|
+```
+
+Additional label fields: IND (index), FKW (production date), LNR (serial), ID
 
 ### Counter/Sync Region (0x1B0)
 
