@@ -17,6 +17,26 @@ This information is provided for educational purposes and for owners working on 
 - [Troubleshooting](#troubleshooting)
 - [Resources](#resources)
 
+## Quick EEPROM Reference
+
+```
+Offset   What                    Example
+──────────────────────────────────────────────────────
+0x009    Part Number             99 66 18 26 00 70  (= 996.618.260.07)
+0x080    OBD Unlock Flag         F6 0A = unlocked, 00 00 = locked
+0x0BA    Transponder IDs         4 keys × ~5 bytes
+0x100    Remote Slot 1           12 bytes (from key barcode)
+0x10C    Remote Slot 2           12 bytes
+0x118    Remote Slot 3           12 bytes
+0x124    Remote Slot 4           12 bytes
+0x1EE    PIN Code                DC 4E 40  (3 bytes, also at 0x1F7)
+0x1F1    ECU Pairing             6D 32 D0 56 D9 78  (6 bytes)
+──────────────────────────────────────────────────────
+Empty remote slot = FF FF FF FF FF FF FF FF B7 FF FF FF
+```
+
+> **Need more detail?** See [docs/EEPROM_MAP.md](docs/EEPROM_MAP.md)
+
 ## Overview
 
 ### System Components
