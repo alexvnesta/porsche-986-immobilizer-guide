@@ -236,6 +236,40 @@ Analysis of 4 different EEPROM sources confirms consistent structure:
 2. Keep original backup in safe location
 3. Verify writes by reading back
 
+## Multi-Dump Analysis (8 ACU + 2 ECU dumps)
+
+### ACU Dump Summary
+
+| Dump | Part # | OBD Status | PIN (0x1EE) | Notes |
+|------|--------|------------|-------------|-------|
+| Your Boxster | 260.07 | LOCKED | `DC 4E 40` | Empty remote slots |
+| Car ID 198 | 260.05 | LOCKED | `4C 02 E3` | 4 keys, 3 remotes |
+| Junkyard ID 201 | 260.05 | LOCKED | `FB 8C 40` | 2 remotes |
+| 2003 M535 | - | LOCKED | `DC 6F C2` | Forum dump |
+| 2003 M535 Unlocked | - | **UNLOCKED** | `DC 6F C2` | Forum unlock |
+| M534 433MHz | 260.06 | CORRUPT | `FF FF FF` | Data lost |
+| M534 2002 | 262.00 | LOCKED | `76 01 81` | Has header VIN |
+| YouTube M534 | 260.06 | **UNLOCKED** | `D8 18 39` | Already unlocked |
+
+### ECU Dump Summary
+
+| Dump | Size | VIN | Notes |
+|------|------|-----|-------|
+| 1998 ROW | 512 bytes | WP0ZZZ99ZXS603723 | Rest of World |
+| 2002 996 | 1024 bytes (5P08) | WP0CA29952S622729 | USA Carrera |
+
+ECU dumps contain full VIN at different offsets than ACU dumps.
+
+### Confirmed Universal Values
+
+| Field | Value | Verified Across |
+|-------|-------|-----------------|
+| OBD Unlock flags | `F6 0A 00 F6 0A` | 3 unlocked dumps |
+| Auth bypass (0x0A2) | `8B 3B 3B 3B 3B EB 3B 3B E6 3B 64 A0 A0 3D` | 3 unlocked dumps |
+| Unlock data (0x0B0) | `3D 85 E5 E5 E5 63 0C` | 3 unlocked dumps |
+| Sync pattern | `B2 22 D4 B2 22 D4` | All valid dumps |
+| Empty markers | `B7` and `06` | All dumps |
+
 ## Known Unknowns
 
 Areas that are not fully understood yet:
