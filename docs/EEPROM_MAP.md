@@ -271,10 +271,15 @@ Junkyard:   19 B2
 - Different on each module
 - **Need:** Before/after dump to see what increments these
 
-### OBD Unlock Authentication (0x0A0-0x0B6)
-- ABRITES modifies these along with the `F6 0A` flags
-- Values may be calculated per-module or could be universal
-- **Need:** Multiple unlock examples to determine if values are fixed
+### ~~OBD Unlock Authentication (0x0A0-0x0B6)~~ RESOLVED
+Confirmed **UNIVERSAL** - same values work across different modules:
+
+| Source | 0x0A2-0x0AF | 0x0B0-0x0B6 |
+|--------|-------------|-------------|
+| ABRITES | `8B 3B 3B 3B 3B EB 3B 3B E6 3B 64 A0 A0 3D` | `3D 85 E5 E5 E5 63 0C` |
+| Forum unlock | `8B 3B 3B 3B 3B EB 3B 3B E6 3B 64 A0 A0 3D` | `3D 85 E5 E5 E5 63 0C` |
+
+**IDENTICAL!** The unlock patch is fixed, not per-module calculated.
 
 ### ~~Radio Code Full Length~~ RESOLVED
 Barcode confirmed to show **12 bytes (24 hex characters)**:

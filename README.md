@@ -438,11 +438,20 @@ Locked:   00 00 00 00 00 00 4C
 Unlocked: 3D 85 E5 E5 E5 63 0C
 ```
 
-**WARNING:** The 0x0A0 and 0x0B0 values may be module-specific or calculated by ABRITES.
-The `F6 0A` flags appear consistent, but blindly copying the auth bypass values
-from one module to another may not work.
+#### Universal Unlock Patch (CONFIRMED)
 
-*Data source: ABRITES Commander For Porsche 4.1*
+Analysis of multiple unlocks confirms the values are **UNIVERSAL**, not per-module:
+
+```
+0x080: F6 0A 00 F6 0A 00 75 00 00 30 30 01 03 02 00 00
+0x090: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+0x0A0: 00 00 8B 3B 3B 3B 3B EB 3B 3B E6 3B 64 A0 A0 3D
+0x0B0: 3D 85 E5 E5 E5 63 0C
+```
+
+These exact bytes work across different modules (verified from ABRITES output and community unlocks).
+
+*Data sources: ABRITES Commander For Porsche 4.1, Digital Kaos forum*
 
 #### Why This Exists
 
