@@ -2,16 +2,120 @@
 
 Detailed memory map for the 93LC66 EEPROM (512 bytes) in M534/M535 alarm control units.
 
-## EEPROM Chip Specifications
+## Quick Reference (TL;DR)
+
+**Need to find something fast? Here are the key offsets:**
+
+| What You Need | Offset | Size | Format |
+|---------------|--------|------|--------|
+| **PIN Code** | `0x1EE` | 3 bytes | `DC 4E 40` → PIN is "DC4E40" |
+| **ECU Pairing Code** | `0x1F1` | 6 bytes | Links ACU↔ECU |
+| **Remote Slot 1** | `0x100` | 12 bytes | From key barcode |
+| **Remote Slot 2** | `0x10C` | 12 bytes | |
+| **Remote Slot 3** | `0x118` | 12 bytes | |
+| **Remote Slot 4** | `0x124` | 12 bytes | |
+| **Part Number** | `0x009` | 6 bytes | `99 66 18 26 00 70` = 996.618.260.07 |
+| **OBD Unlock Flag** | `0x080` | 2 bytes | `F6 0A` = unlocked |
+
+**Empty remote slot looks like:** `FF FF FF FF FF FF FF FF B7 FF FF FF`
+
+**PIN is stored twice:** at `0x1EE` and `0x1F7` (both must match)
+
+---
+
+## Visual Memory Map
+
+```
+0x000 ┌─────────────────────────────────────┐
+      │  Header / Partial VIN               │
+0x009 ├─────────────────────────────────────┤
+      │  Part Number (6 bytes)              │
+0x00F ├─────────────────────────────────────┤
+      │  Vehicle Configuration              │
+0x020 ├─────────────────────────────────────┤
+      │  Config Block A                     │
+0x050 ├─────────────────────────────────────┤
+      │  Config Block B (mirror of A)       │
+0x080 ├─────────────────────────────────────┤
+      │  ★ OBD ACCESS FLAGS ★               │  ← F6 0A = unlocked
+0x0A0 ├─────────────────────────────────────┤
+      │  Authentication / Key Data          │
+0x0BA ├─────────────────────────────────────┤
+      │  ★ TRANSPONDER IDs (4 keys) ★       │  ← For engine start
+0x100 ├─────────────────────────────────────┤
+      │  ★ REMOTE SLOTS (4 × 12 bytes) ★    │  ← For lock/unlock
+0x160 ├─────────────────────────────────────┤
+      │  (unused)                           │
+0x1B0 ├─────────────────────────────────────┤
+      │  Counter / Sync Region              │
+0x1C0 ├─────────────────────────────────────┤
+      │  (unused)                           │
+0x1EE ├─────────────────────────────────────┤
+      │  ★ PIN CODE ★ (3 bytes)             │  ← Key learning code
+0x1F1 ├─────────────────────────────────────┤
+      │  ★ ECU PAIRING ★ (6 bytes)          │  ← Links ACU to ECU
+0x1F7 ├─────────────────────────────────────┤
+      │  PIN CODE (backup copy)             │
+0x1FA ├─────────────────────────────────────┤
+      │  ECU PAIRING (backup copy)          │
+0x200 └─────────────────────────────────────┘
+```
+
+---
+
+## EEPROM Chip Info
 
 | Property | Value |
 |----------|-------|
 | Chip | 93LC66 (Microchip or equivalent) |
-| Size | 512 bytes (4096 bits) |
+| Size | 512 bytes |
 | Package | SOIC-8 |
-| Interface | Microwire/SPI (NOT I2C) |
-| Organization | 256 × 16-bit words |
-| Read Mode | Use 8-bit mode (512 bytes) |
+| Read Mode | **Use 8-bit mode** |
+
+---
+
+## Common Tasks
+
+### Extract PIN Code
+```bash
+# Using the analyzer script:
+python3 tools/eeprom_analyzer.py your_dump.bin
+
+# Manual with xxd:
+xxd -s 0x1EE -l 3 -p dump.bin
+```
+
+### Check if OBD is Unlocked
+Look at offset `0x080`:
+- `F6 0A` = **UNLOCKED** (can program via OBD)
+- `00 00` = **LOCKED** (need EEPROM access)
+
+### Find Remote Code
+Each slot is 12 bytes starting at:
+- Slot 1: `0x100`
+- Slot 2: `0x10C`
+- Slot 3: `0x118`
+- Slot 4: `0x124`
+
+If slot shows `FF FF FF FF FF FF FF FF B7 FF FF FF`, it's empty.
+
+---
+
+## For More Details
+
+- [OBD Unlock Technical Details](#obd-access-control-detailed)
+- [Key Slot Structure](#key-slot-structure)
+- [Byte Swapping Explained](#byte-swapping-16-bit-eeprom)
+- [IPAS Codes Reference](#ipas-codes-explained)
+- [Multi-Dump Analysis](#multi-dump-analysis)
+
+---
+
+# Technical Deep Dive
+
+*Everything below is for those who want the full details.*
+
+---
 
 ## Complete Memory Map
 
@@ -49,9 +153,7 @@ Offset      Size    Description
 ──────────────────────────────────────────────────────────────────
 ```
 
-## Critical Regions Detailed
-
-### Part Number (0x009-0x00E)
+## Part Number Decoding (0x009-0x00E)
 
 ```
 Bytes:   99 66 18 26 00 70
@@ -62,54 +164,34 @@ Decoded: 996.618.260.07
          └────────────── Manufacturer (996 = Porsche)
 ```
 
-### OBD Access Control (0x080-0x0B6)
+## OBD Access Control (Detailed)
 
 **This controls whether the module accepts programming via OBD-II diagnostic port.**
 
-ABRITES Commander modifies **THREE regions** to enable OBD access - not just the flags!
+ABRITES Commander modifies **THREE regions** (39 bytes total) to enable OBD access.
 
-#### Region 1: OBD Flags (0x080-0x08F)
-
-```
-         0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
-Locked:   00 00 00 55 55 00 50 75 30 50 03 30 00 05 00 00
-Unlocked: F6 0A 00 F6 0A 00 75 00 00 30 30 01 03 02 00 00
-          ^^^^^^^^^^^^^^^^^^    ^^    ^^ ^^ ^^    ^^
-```
+### Region 1: OBD Flags (0x080-0x08F)
 
 | Offset | Locked | Unlocked | Purpose |
 |--------|--------|----------|---------|
 | 0x080-0x081 | `00 00` | `F6 0A` | OBD enable flag 1 |
 | 0x083-0x084 | `55 55` | `F6 0A` | OBD enable flag 2 |
-| 0x086 | `50` | `75` | Access mode |
-| 0x088-0x08B | `30 50 03 30` | `00 30 30 01` | Config flags |
-| 0x08D | `05` | `02` | Unknown flag |
 
-#### Region 2: Authentication Values (0x0A0-0x0AF)
+### Region 2: Authentication Values (0x0A0-0x0AF)
 
 ```
-         0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
-Locked:   00 00 7A 7A 75 7A 75 73 75 75 7A 7A 00 00 00 00
 Unlocked: 00 00 8B 3B 3B 3B 3B EB 3B 3B E6 3B 64 A0 A0 3D
-                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ^^^^^^^^^^^
 ```
 
-These bytes appear to be authentication/challenge-response bypass values.
-
-#### Region 3: Additional Unlock Data (0x0B0-0x0B6)
+### Region 3: Additional Unlock Data (0x0B0-0x0B6)
 
 ```
-         0  1  2  3  4  5  6
-Locked:   00 00 00 00 00 00 4C
 Unlocked: 3D 85 E5 E5 E5 63 0C
-          ^^^^^^^^^^^^^^^^^^^^
 ```
 
-Note: Bytes 0x0B7+ (transponder IDs) are NOT modified.
+### Complete OBD Unlock Patch
 
-#### Complete OBD Unlock Patch
-
-To unlock OBD access, modify these 33 bytes:
+To unlock OBD access, write these bytes:
 
 ```
 0x080: F6 0A 00 F6 0A 00 75 00 00 30 30 01 03 02 00 00
@@ -117,294 +199,93 @@ To unlock OBD access, modify these 33 bytes:
 0x0B0: 3D 85 E5 E5 E5 63 0C
 ```
 
-**WARNING:** The 0x0A0 and 0x0B0 values shown above may be module-specific.
-The `F6 0A` flags at 0x080 are consistent, but the authentication bypass
-values might need to be calculated per-module by ABRITES.
+**These values are UNIVERSAL** - confirmed identical across multiple unlocked dumps.
 
-*Data source: ABRITES Commander For Porsche 4.1 (www.abritus72.com)*
-
-### Key Slot Structure (0x0BA-0x154)
+## Key Slot Structure
 
 Each key has:
-1. **Transponder ID** (4 bytes) - in 0x0BA-0x0E1 region
-2. **Radio Code** (4+ bytes) - stored TWICE for redundancy
+1. **Transponder ID** (4 bytes) - in 0x0BA-0x0E1 region - for ENGINE START
+2. **Remote Code** (12 bytes) - in 0x100+ region - for LOCK/UNLOCK
 
-| Key | Transponder Offset | Radio Copy 1 | Radio Copy 2 |
-|-----|-------------------|--------------|--------------|
-| A | 0x0BA-0x0BD | 0x0E2-0x0E5 | 0x0F7-0x0FA |
-| B | 0x0BF-0x0C2 | 0x100-0x103 | 0x115-0x118 |
-| C | 0x0C4-0x0C7 | 0x11E-0x121 | 0x133-0x136 |
-| D | 0x0C9-0x0CC | 0x13C-0x13F | 0x151-0x154 |
-
-**Verified against PIWIS diagnostic output - transponder IDs match exactly.**
-
-### Remote Control Slots (0x100-0x15F)
-
-Each slot is approximately 24 bytes with the 12-byte barcode code at the start.
-
-**Empty slot pattern:**
-```
-FF FF FF FF FF FF FF FF B7 FF FF FF FF FF 06 FF
-                        ^^              ^^
-                        Empty markers (B7 and 06)
-```
-
-**Programmed slot example:**
-```
-40 01 4F 13 06 1E 41 5F C6 04 0F AE ...
-└─────────┘
-Radio code (first 4 bytes visible on barcode as 8 hex chars)
-```
-
-### PIN Code Region (0x1EE-0x1FF)
-
-The 3-byte PIN is stored **twice** for redundancy:
-
-```
-0x1EE: [PIN byte 1] [PIN byte 2] [PIN byte 3]
-0x1F7: [PIN byte 1] [PIN byte 2] [PIN byte 3]  ← Must match!
-```
-
-**Examples from analyzed dumps:**
-
-| Dump | PIN at 0x1EE | PIN at 0x1F7 | Match |
-|------|--------------|--------------|-------|
-| Boxster | `DC 4E 40` | `DC 4E 40` | ✓ |
-| Car (ID 198) | `4C 02 E3` | `4C 02 E3` | ✓ |
-| Junkyard (ID 201) | `FB 8C 40` | `FB 8C 40` | ✓ |
-
-### Sync Pattern (0x1B5-0x1BA)
-
-All analyzed dumps show: `B2 22 D4 B2 22 D4`
-
-This pattern is related to rolling code synchronization.
+| Key | Transponder Offset | Remote Slot Offset |
+|-----|-------------------|-------------------|
+| 1 | 0x0BA | 0x100 |
+| 2 | 0x0BF | 0x10C |
+| 3 | 0x0C4 | 0x118 |
+| 4 | 0x0C9 | 0x124 |
 
 ## IPAS Codes Explained
 
-Porsche dealers have access to IPAS (Integrated Porsche Aftersales System) which stores various codes by VIN. Here's how they relate to EEPROM data:
+Porsche dealers access these codes via IPAS (Integrated Porsche Aftersales System):
 
-| IPAS Code Name | Digits | Source | EEPROM Location |
-|----------------|--------|--------|-----------------|
-| **Key Learning Code (PAS-Code)** | 6 hex | ACU | `0x1EE-0x1F0` (PIN) |
-| **Alarm Learning Code** | 12 hex | ACU | `0x1F1-0x1F6` (ECU Pairing) |
-| **DME Programming Code** | 6 hex | ECU | In DME EEPROM, not ACU |
-| **Immobilizer Code** | 16 hex | Both | Combined ACU + ECU pairing data |
-| **Remote Transmitter Code** | 24 hex | Key card | `0x100+` (12 bytes per slot) |
+| IPAS Code Name | Digits | EEPROM Location |
+|----------------|--------|-----------------|
+| **Key Learning Code (PAS-Code)** | 6 hex | `0x1EE-0x1F0` |
+| **Alarm Learning Code** | 12 hex | `0x1F1-0x1F6` |
+| **Remote Transmitter Code** | 24 hex | `0x100+` |
 
-### What Each Code Does
-
-- **Key Learning Code (PIN)**: Required to enter programming mode via PIWIS/PST2
-- **Alarm Learning Code**: Links ACU to vehicle - needed when replacing ACU
-- **DME Programming Code**: Required for ECU replacement/flashing
-- **Immobilizer Code**: The full secret linking ACU↔ECU - prevents module swapping
-- **Remote Transmitter Code**: From barcode on key - programs lock/unlock function
-
-### Extracting Codes from EEPROM
-
-```bash
-# Key Learning Code (PIN) - 3 bytes = 6 hex digits
-xxd -s 0x1EE -l 3 -p dump.bin
-
-# Alarm Learning Code (ECU Pairing) - 6 bytes = 12 hex digits
-xxd -s 0x1F1 -l 6 -p dump.bin
-
-# First Remote Code - 12 bytes = 24 hex digits
-xxd -s 0x100 -l 12 -p dump.bin
-```
-
-**Note:** Remote codes are NOT stored in IPAS after initial sale. If you lose the barcode tag from your key, the code cannot be recovered from Porsche - only from the EEPROM itself.
+**Note:** Remote codes are NOT stored in IPAS after initial sale. Lost barcode = recover from EEPROM only.
 
 ## Byte-Swapping (16-bit EEPROM)
 
-The 93LC66 stores 16-bit words. Depending on how you read the dump, bytes may appear swapped:
+The 93LC66 stores 16-bit words. When writing remote codes:
 
-```
-EEPROM stores:  [High Byte][Low Byte]
-Raw 8-bit dump: [Low Byte][High Byte]  ← each pair reversed
-```
-
-**When to swap:**
-
-| Operation | Swap Needed? | Notes |
-|-----------|--------------|-------|
-| Read PIN code | Yes | To see human-readable value |
-| Read radio code | Yes | To match barcode label |
-| Write radio code | Yes | Swap before writing to EEPROM |
-| Write OBD unlock (`F6 0A`) | No | Raw constant, no interpretation |
-
-**Example:**
 ```
 Barcode label:    40 13 A9 89 D1 4C 23 2D BF 06 B7 C5
 Write to EEPROM:  13 40 89 A9 4C D1 2D 23 06 BF C5 B7
 ```
 
-## Multi-Dump Comparison
+Swap each pair of bytes before writing!
 
-Analysis of 4 different EEPROM sources confirms consistent structure:
+## Multi-Dump Analysis
 
-| Field | Boxster | Car (198) | Junkyard (201) | Verified |
-|-------|---------|-----------|----------------|----------|
-| Part # offset | 0x009 | 0x009 | 0x009 | ✓ |
-| Config mirror | 0x020=0x050 | 0x020=0x050 | 0x020=0x050 | ✓ |
-| OBD flags | 0x080 | 0x080 | 0x080 | ✓ |
-| PIN offset | 0x1EE & 0x1F7 | 0x1EE & 0x1F7 | 0x1EE & 0x1F7 | ✓ |
-| Sync pattern | 0x1B5 | 0x1B5 | 0x1B5 | ✓ |
-| Remote slots | 0x100+ | 0x100+ | 0x100+ | ✓ |
+Analysis of 8 ACU dumps confirms consistent structure:
 
-**All dumps show identical structure - offsets are consistent across modules.**
+| Dump | Part # | OBD Status | PIN (0x1EE) |
+|------|--------|------------|-------------|
+| Boxster M535 | 260.07 | LOCKED | `DC 4E 40` |
+| 2003 M535 | 262.03 | LOCKED | `DC 6F C2` |
+| 2003 M535 Unlocked | 262.03 | **UNLOCKED** | `DC 6F C2` |
+| YouTube M534 | - | **UNLOCKED** | `D8 18 39` |
+
+### Confirmed Universal Values
+
+| Field | Value |
+|-------|-------|
+| OBD Unlock flags | `F6 0A 00 F6 0A` |
+| Sync pattern | `B2 22 D4 B2 22 D4` |
+| Empty slot markers | `B7` and `06` |
+
+## ECU Pairing Code
+
+The 6 bytes at `0x1F1` link your ACU to your ECU. They must match for the immobilizer to work:
+
+```
+ACU (0x1F1):  3D B8 7A 21 E9 94
+ECU (0x1E4):  3D B8 7A 21 E9 00  ← First 5 bytes MATCH
+```
+
+**This is why you can't swap ACU or ECU modules** - the pairing must match!
 
 ## Safe vs Risky Modifications
 
 ### Safe (Tested)
 - Reading PIN from 0x1EE
 - Writing remote codes to 0x100+ slots
-- Reading transponder IDs
-- OBD unlock (0x080 = `F6 0A 00 F6 0A`)
+- OBD unlock (0x080 = `F6 0A`)
 
 ### Risky (Use Caution)
 - Modifying transponder region (0x0B0-0x0FF)
-- Changing configuration blocks (0x020, 0x050)
-- Altering PIN values (could lock out all access)
+- Changing configuration blocks
+- Altering PIN values
 
 ### Always
 1. Read EEPROM twice and compare
-2. Keep original backup in safe location
+2. Keep original backup
 3. Verify writes by reading back
 
-## References & Sources
+## References
 
-- [bdm310/996-Immobilizer](https://github.com/bdm310/996-Immobilizer) - Original reverse engineering (PIN locations, part number decoding)
-- [ABRITES Commander For Porsche 4.1](https://www.abritus72.com/) - OBD unlock data
-- [Digital Kaos Forum](https://www.digital-kaos.co.uk/forums/) - Community unlocks and dumps
-- [Rennlist Forums](https://rennlist.com/forums/) - PIN offset confirmation
-- [M534PSI Performance YouTube](https://www.youtube.com/) - Byte-swapping explanation
-
-## Multi-Dump Analysis (8 ACU + 2 ECU dumps)
-
-### ACU Dump Summary
-
-| Dump | Part # | OBD Status | PIN (0x1EE) | Notes |
-|------|--------|------------|-------------|-------|
-| Your Boxster | 260.07 | LOCKED | `DC 4E 40` | Empty remote slots |
-| Car ID 198 | 260.05 | LOCKED | `4C 02 E3` | 4 keys, 3 remotes |
-| Junkyard ID 201 | 260.05 | LOCKED | `FB 8C 40` | 2 remotes |
-| 2003 M535 | - | LOCKED | `DC 6F C2` | Forum dump |
-| 2003 M535 Unlocked | - | **UNLOCKED** | `DC 6F C2` | Forum unlock |
-| M534 433MHz | 260.06 | CORRUPT | `FF FF FF` | Data lost |
-| M534 2002 | 262.00 | LOCKED | `76 01 81` | Has header VIN |
-| YouTube M534 | 260.06 | **UNLOCKED** | `D8 18 39` | Already unlocked |
-
-### ECU Dump Summary
-
-| Dump | Size | VIN | Notes |
-|------|------|-----|-------|
-| 1998 ROW | 512 bytes | WP0ZZZ99ZXS603723 | Rest of World |
-| 2002 996 | 1024 bytes (5P08) | WP0CA29952S622729 | USA Carrera |
-
-ECU dumps contain full VIN at different offsets than ACU dumps.
-
-### Confirmed Universal Values
-
-| Field | Value | Verified Across |
-|-------|-------|-----------------|
-| OBD Unlock flags | `F6 0A 00 F6 0A` | 3 unlocked dumps |
-| Auth bypass (0x0A2) | `8B 3B 3B 3B 3B EB 3B 3B E6 3B 64 A0 A0 3D` | 3 unlocked dumps |
-| Unlock data (0x0B0) | `3D 85 E5 E5 E5 63 0C` | 3 unlocked dumps |
-| Sync pattern | `B2 22 D4 B2 22 D4` | All valid dumps |
-| Empty markers | `B7` and `06` | All dumps |
-
-## Known Unknowns
-
-Areas that are not fully understood yet:
-
-### Header Region (0x000-0x008)
-```
-Boxster:    00 00 00 00 00 00 00 00 00  (empty)
-Car 198:    41 41 32 99 39 58 09 80 E3  ("AA2" visible)
-Junkyard:   43 41 32 98 58 57 09 82 A4  ("CA2" visible)
-```
-- Some modules have ASCII characters that could be partial VIN
-- Your Boxster has all zeros - unclear if this matters
-- **Need:** More samples to determine pattern
-
-### ~~Bytes After PIN (0x1F1-0x1F6 / 0x1FA-0x1FF)~~ RESOLVED
-
-**These are the ECU/DME PAIRING CODE!**
-
-Analysis of paired ECU+ACU dumps from the same car confirms these 6 bytes link the ACU to the ECU:
-
-```
-2002 ACU (0x1F1):  3D B8 7A 21 E9 94
-2002 ECU (0x1E4):  3D B8 7A 21 E9 00  ← First 5 bytes MATCH!
-```
-
-| Dump | Pairing Code (0x1F1) | Notes |
-|------|---------------------|-------|
-| Boxster | `6D 32 D0 56 D9 78` | Unique to this car |
-| Car 198 | `00 CD 3A D9 7C 99` | Different car |
-| 2002 M534 | `3D B8 7A 21 E9 94` | Matches ECU dump |
-
-**This is why you can't just swap ACU or ECU modules** - the pairing code must match in both!
-
-### Counter Values (0x1BB-0x1BC)
-```
-Boxster:    31 A6
-Car 198:    7D 87
-Junkyard:   19 B2
-```
-- Follows the `B2 22 D4` sync pattern
-- Different on each module
-- **Need:** Before/after dump to see what increments these
-
-### ~~OBD Unlock Authentication (0x0A0-0x0B6)~~ RESOLVED
-Confirmed **UNIVERSAL** - same values work across different modules:
-
-| Source | 0x0A2-0x0AF | 0x0B0-0x0B6 |
-|--------|-------------|-------------|
-| ABRITES | `8B 3B 3B 3B 3B EB 3B 3B E6 3B 64 A0 A0 3D` | `3D 85 E5 E5 E5 63 0C` |
-| Forum unlock | `8B 3B 3B 3B 3B EB 3B 3B E6 3B 64 A0 A0 3D` | `3D 85 E5 E5 E5 63 0C` |
-
-**IDENTICAL!** The unlock patch is fixed, not per-module calculated.
-
-### ~~Radio Code Full Length~~ RESOLVED
-Barcode confirmed to show **12 bytes (24 hex characters)**:
-```
-40 17 52 3C D1 7E A3 A3 19 2A 27 E4
-```
-From label on new remote PCB (996.637.244.17)
-
-### Checksums
-- No obvious checksum algorithm identified
-- Remote code modifications work without updating other bytes
-- Configuration blocks mirror each other (0x020 = 0x050)
-- **Need:** Test if arbitrary modifications cause rejection
-
-## Quick Reference Patterns
-
-### Empty Remote Slot
-```
-FF FF FF FF FF FF FF FF B7 FF FF FF FF FF 06 FF
-                        ^^              ^^
-                        Empty markers (always present)
-```
-
-### Programmed Remote Slot
-```
-40 05 90 50 23 6E 31 7F 29 18 D8 21 ...
-|<-------- 12-byte barcode code -------->|
-```
-
-### Valid Header Structure
-```
-0000: 00 00 00 00 00 00 00 00 00 99 66 18 26 00 70 00
-                                ^^^^^^^^^^^^^^^^^^
-                                Part number at 0x009
-```
-
-### Corruption Indicators
-| Pattern | Meaning |
-|---------|---------|
-| All `FF` | EEPROM erased |
-| All `00` | Data corruption |
-| PIN mismatch (0x1EE ≠ 0x1F7) | Corruption or failed write |
-| Config mismatch (0x020 ≠ 0x050) | Unusual - investigate |
+- [bdm310/996-Immobilizer](https://github.com/bdm310/996-Immobilizer) - Original reverse engineering
+- [ABRITES Commander](https://www.abritus72.com/) - OBD unlock data
+- [Rennlist Forums](https://rennlist.com/forums/) - Community verification
