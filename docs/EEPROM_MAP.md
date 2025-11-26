@@ -10,229 +10,188 @@ Detailed memory map for the 93LC66 EEPROM (512 bytes) in M534/M535 alarm control
 | Size | 512 bytes (4096 bits) |
 | Package | SOIC-8 |
 | Interface | Microwire/SPI (NOT I2C) |
-| Organization | 256 x 16-bit or 512 x 8-bit |
-| Read Mode | Use 8-bit mode for this application |
+| Organization | 256 × 16-bit words |
+| Read Mode | Use 8-bit mode (512 bytes) |
 
 ## Complete Memory Map
 
-### Header Region (0x000-0x00F)
+```
+Offset      Size    Description
+──────────────────────────────────────────────────────────────────
+0x000-0x008    9    Header (may contain partial VIN)
+0x009-0x00E    6    ACU Part Number
+0x00F-0x01F   17    Vehicle configuration
+
+0x020-0x04F   48    Configuration Block A
+0x050-0x07F   48    Configuration Block B (MIRROR of A)
+
+0x080-0x087    8    ★ OBD ACCESS CONTROL FLAGS ★
+0x088-0x09F   24    Additional flags / rolling code data
+
+0x0A0-0x0B9   26    Key sync/authentication data
+0x0BA-0x0E1   40    ★ TRANSPONDER IDs (4 keys × ~10 bytes) ★
+0x0E2-0x0FF   30    Radio codes region 1 (Keys A partial)
+
+0x100-0x15F   96    ★ REMOTE CONTROL CODES (4 slots) ★
+
+0x160-0x1AF   80    Unused (zeros)
+
+0x1B0-0x1B4    5    Zeros
+0x1B5-0x1BA    6    Sync pattern (B2 22 D4 repeated)
+0x1BB-0x1BF    5    Counter values
+
+0x1C0-0x1ED   46    Unused (zeros)
+
+0x1EE-0x1F0    3    ★ PIN CODE (Copy 1) ★
+0x1F1-0x1F6    6    Checksums / additional codes
+0x1F7-0x1F9    3    ★ PIN CODE (Copy 2) ★
+0x1FA-0x1FF    6    Checksums / additional codes
+──────────────────────────────────────────────────────────────────
+```
+
+## Critical Regions Detailed
+
+### Part Number (0x009-0x00E)
 
 ```
-Offset  Length  Description
-------  ------  -----------
-0x000   9       Unknown/Header data
-0x009   6       ACU Part Number (see decoding below)
-0x00F   1       Unknown
-```
-
-**Part Number Decoding:**
-```
-Bytes at 0x009-0x00E: 99 66 18 26 00 70
-                      │  │  │  │  │  │
-                      │  │  │  │  │  └─ Minor revision (07)
-                      │  │  │  │  └──── Major revision (0)
-                      │  │  │  └─────── Model code (26)
-                      │  │  └────────── Series (18)
-                      │  └───────────── Product (66)
-                      └────────────────  Manufacturer (99=Porsche)
-
+Bytes:   99 66 18 26 00 70
 Decoded: 996.618.260.07
+         │   │   │   └── Revision (07)
+         │   │   └────── Model (260)
+         │   └────────── Series (618)
+         └────────────── Manufacturer (996 = Porsche)
 ```
 
-### Configuration Data (0x010-0x08F)
+### OBD Access Control Flags (0x080-0x087)
 
-```
-Offset  Length  Description
-------  ------  -----------
-0x010   4       Unknown configuration
-0x014   12      Unknown
-0x020   48      Configuration block 1 (repeated at 0x050)
-0x050   48      Configuration block 2 (mirror of 0x020)
-0x080   16      Vehicle configuration flags
-```
+**This controls whether the module accepts programming via OBD-II diagnostic port.**
 
-The configuration blocks at 0x020 and 0x050 contain identical data - likely for redundancy.
+| Offset | Locked (Default) | Unlocked | Purpose |
+|--------|------------------|----------|---------|
+| 0x080-0x081 | `00 00` or `55 55` | `F6 0A` | OBD enable flag 1 |
+| 0x082 | `00` | `00` | Separator |
+| 0x083-0x084 | `00 00` or `55 55` | `F6 0A` | OBD enable flag 2 |
+| 0x085-0x087 | `55 75 00` | varies | Additional flags |
 
-### Key Data Region (0x090-0x0AF)
-
-```
-Offset  Length  Description
-------  ------  -----------
-0x090   16      Rolling code counters and sync data
-0x0A0   16      Additional key pairing data
+**Firmware check (pseudocode):**
+```c
+if (eeprom[0x80] == 0xF6 && eeprom[0x81] == 0x0A &&
+    eeprom[0x83] == 0xF6 && eeprom[0x84] == 0x0A) {
+    allow_obd_programming = true;
+}
 ```
 
-This region contains dynamic data that changes as keys are used.
+**All 3 dumps analyzed show LOCKED state:** `00 00 55 00 00 55 75 00`
 
-### Transponder Region (0x0B0-0x0FF)
+### Key Slot Structure (0x0BA-0x154)
 
-```
-Offset  Length  Description
-------  ------  -----------
-0x0B0   16      Transponder configuration
-0x0C0   16      Transponder ID slots (4 bytes each, up to 4 transponders)
-0x0D0   16      Additional transponder data
-0x0E0   16      Transponder sync/counter data
-0x0F0   16      Unknown (often contains markers B7, 06)
-```
+Each key has:
+1. **Transponder ID** (4 bytes) - in 0x0BA-0x0E1 region
+2. **Radio Code** (4+ bytes) - stored TWICE for redundancy
 
-**Transponder ID Location:**
-Each transponder (ID48 chip) has a unique 4-byte ID stored in this region.
+| Key | Transponder Offset | Radio Copy 1 | Radio Copy 2 |
+|-----|-------------------|--------------|--------------|
+| A | 0x0BA-0x0BD | 0x0E2-0x0E5 | 0x0F7-0x0FA |
+| B | 0x0BF-0x0C2 | 0x100-0x103 | 0x115-0x118 |
+| C | 0x0C4-0x0C7 | 0x11E-0x121 | 0x133-0x136 |
+| D | 0x0C9-0x0CC | 0x13C-0x13F | 0x151-0x154 |
+
+**Verified against PIWIS diagnostic output - transponder IDs match exactly.**
 
 ### Remote Control Slots (0x100-0x15F)
 
-This is the most important region for remote programming.
+Each slot is approximately 24 bytes with the 12-byte barcode code at the start.
 
-```
-Offset    Length  Description
-------    ------  -----------
-0x100-0x10B  12   Remote Slot 1 (12-byte code from barcode)
-0x10C-0x10F   4   Slot 1 extra data (counter/checksum?)
-0x110-0x11B  12   Remote Slot 2
-0x11C-0x11F   4   Slot 2 extra data
-0x120-0x12B  12   Remote Slot 3
-0x12C-0x12F   4   Slot 3 extra data
-0x130-0x13B  12   Remote Slot 4
-0x13C-0x13F   4   Slot 4 extra data
-0x140-0x15F  32   Additional remote data/unused
-```
-
-**Empty Slot Pattern:**
+**Empty slot pattern:**
 ```
 FF FF FF FF FF FF FF FF B7 FF FF FF FF FF 06 FF
-```
-The `B7` at offset +8 and `06` at offset +14 are markers for unprogrammed state.
-
-**Programmed Slot Example:**
-```
-40 05 90 50 23 6E 31 7F 29 18 D8 21 A3 5F EE 19
-│<──────── 12-byte barcode code ────────>│ │extra│
+                        ^^              ^^
+                        Empty markers (B7 and 06)
 ```
 
-### Unused Region (0x160-0x1AF)
-
+**Programmed slot example:**
 ```
-Offset  Length  Description
-------  ------  -----------
-0x160   80      All zeros (unused/reserved)
-```
-
-### Counter/Sync Region (0x1B0-0x1BF)
-
-```
-Offset  Length  Description
-------  ------  -----------
-0x1B0   5       Zeros
-0x1B5   6       Sync pattern (e.g., B2 22 D4 B2 22 D4)
-0x1BB   2       Counter value
-0x1BD   3       Zeros
+40 01 4F 13 06 1E 41 5F C6 04 0F AE ...
+└─────────┘
+Radio code (first 4 bytes visible on barcode as 8 hex chars)
 ```
 
-The `B2 22 D4` pattern is related to rolling code synchronization.
+### PIN Code Region (0x1EE-0x1FF)
 
-### Unused Region (0x1C0-0x1ED)
-
-```
-Offset  Length  Description
-------  ------  -----------
-0x1C0   46      All zeros (unused/reserved)
-```
-
-### PIN/Key Learning Code Region (0x1EE-0x1FF)
-
-**This is the most critical region for programming access.**
+The 3-byte PIN is stored **twice** for redundancy:
 
 ```
-Offset  Length  Description
-------  ------  -----------
-0x1EE   3       PIN Code (1st copy) - KEY LEARNING CODE
-0x1F1   6       Additional codes (checksum, immobilizer?)
-0x1F7   3       PIN Code (2nd copy) - Redundant copy
-0x1FA   6       Additional codes (mirrors 0x1F1?)
+0x1EE: [PIN byte 1] [PIN byte 2] [PIN byte 3]
+0x1F7: [PIN byte 1] [PIN byte 2] [PIN byte 3]  ← Must match!
 ```
 
-**PIN Code Format:**
-```
-Location 0x1EE: DC 4E 40  ─┐
-                          ├─ These should match
-Location 0x1F7: DC 4E 40  ─┘
+**Examples from analyzed dumps:**
 
-Enter in PIWIS as: DC 4E 40 (3 bytes, 6 hex characters)
-```
+| Dump | PIN at 0x1EE | PIN at 0x1F7 | Match |
+|------|--------------|--------------|-------|
+| Boxster | `DC 4E 40` | `DC 4E 40` | ✓ |
+| Car (ID 198) | `4C 02 E3` | `4C 02 E3` | ✓ |
+| Junkyard (ID 201) | `FB 8C 40` | `FB 8C 40` | ✓ |
 
-## Hex Dump Examples
+### Sync Pattern (0x1B5-0x1BA)
 
-### Empty/Virgin ACU (Remote Slots)
+All analyzed dumps show: `B2 22 D4 B2 22 D4`
 
-```
-0100: FF FF FF FF FF FF FF FF B7 FF FF FF FF FF 06 FF  ................
-0110: FF FF FF FF 06 FF FF FF FF FF FF FF FF B7 FF FF  ................
-0120: FF FF FF FF FF FF B7 FF FF FF FF FF 06 FF FF FF  ................
-0130: FF FF 06 FF FF FF FF FF FF FF FF B7 FF FF FF FF  ................
-```
+This pattern is related to rolling code synchronization.
 
-### Programmed ACU (With 2 Remotes)
+## Byte-Swapping (16-bit EEPROM)
+
+The 93LC66 stores 16-bit words. Depending on how you read the dump, bytes may appear swapped:
 
 ```
-0100: 40 05 90 50 23 6E 31 7F 29 18 D8 21 A3 5F EE 19  @..P#n1.)..!._..
-0110: 64 37 23 7D AD 40 05 90 50 23 6E 31 7F 29 40 17  d7#}.@..P#n1.)@.
-0120: F7 55 5C 29 23 47 1B 1C 76 A3 B4 58 C0 1A 11 B8  .U\)#G..v..X....
-0130: AA 7E F6 40 17 F7 55 5C 29 23 47 1B FF FF FF FF  .~.@..U\)#G.....
+EEPROM stores:  [High Byte][Low Byte]
+Raw 8-bit dump: [Low Byte][High Byte]  ← each pair reversed
 ```
 
-### PIN Region Comparison
+**When to swap:**
 
-**Example 1:**
+| Operation | Swap Needed? | Notes |
+|-----------|--------------|-------|
+| Read PIN code | Yes | To see human-readable value |
+| Read radio code | Yes | To match barcode label |
+| Write radio code | Yes | Swap before writing to EEPROM |
+| Write OBD unlock (`F6 0A`) | No | Raw constant, no interpretation |
+
+**Example:**
 ```
-01E0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 DC 4E  ...............N
-01F0: 40 6D 32 D0 56 D9 78 DC 4E 40 6D 32 D0 56 D9 78  @m2.V.x.N@m2.V.x
-                          ^^^^^^^^
-                          PIN repeated at 0x1F7
+Barcode label:    40 13 A9 89 D1 4C 23 2D BF 06 B7 C5
+Write to EEPROM:  13 40 89 A9 4C D1 2D 23 06 BF C5 B7
 ```
 
-**Example 2 (from video):**
-```
-01E0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 D8 18  ...............
-01F0: 39 87 73 31 64 A6 18 DF 87 D8 31 39 A6 73 DF 64  9.s1d.....19.s.d
-```
+## Multi-Dump Comparison
 
-## Byte-Swapping Notes
+Analysis of 4 different EEPROM sources confirms consistent structure:
 
-The ABRITES software has a "Swap Bytes L/H" function because the 93LC66 can be read in 16-bit mode where bytes are swapped. When reading in **8-bit mode** (recommended), no swapping is needed.
+| Field | Boxster | Car (198) | Junkyard (201) | Verified |
+|-------|---------|-----------|----------------|----------|
+| Part # offset | 0x009 | 0x009 | 0x009 | ✓ |
+| Config mirror | 0x020=0x050 | 0x020=0x050 | 0x020=0x050 | ✓ |
+| OBD flags | 0x080 | 0x080 | 0x080 | ✓ |
+| PIN offset | 0x1EE & 0x1F7 | 0x1EE & 0x1F7 | 0x1EE & 0x1F7 | ✓ |
+| Sync pattern | 0x1B5 | 0x1B5 | 0x1B5 | ✓ |
+| Remote slots | 0x100+ | 0x100+ | 0x100+ | ✓ |
 
-If your dump looks scrambled, try:
-1. Re-read in 8-bit mode
-2. Or swap every pair of bytes
+**All dumps show identical structure - offsets are consistent across modules.**
 
-## Checksum Information
+## Safe vs Risky Modifications
 
-There may be checksums in the EEPROM, but they haven't been fully documented. Known observations:
+### Safe (Tested)
+- Reading PIN from 0x1EE
+- Writing remote codes to 0x100+ slots
+- Reading transponder IDs
+- OBD unlock (0x080 = `F6 0A 00 F6 0A`)
 
-- The PIN is stored twice (0x1EE and 0x1F7) for redundancy
-- Configuration blocks at 0x020 and 0x050 are mirrors
-- Modifying remote codes at 0x100 appears to work without updating checksums
+### Risky (Use Caution)
+- Modifying transponder region (0x0B0-0x0FF)
+- Changing configuration blocks (0x020, 0x050)
+- Altering PIN values (could lock out all access)
 
-## Modifying the EEPROM
-
-### Safe Modifications
-
-These modifications are known to work:
-
-1. **Writing remote codes to 0x100-0x10B** - Tested and working
-2. **Reading PIN from 0x1EE** - Confirmed accurate
-
-### Potentially Unsafe Modifications
-
-These should be done with caution:
-
-1. Modifying transponder region (0x0B0-0x0FF)
-2. Changing configuration blocks (0x020, 0x050)
-3. Altering PIN values
-
-### Always Keep Backups!
-
-Before any modification:
-1. Read EEPROM at least twice
-2. Compare both reads to verify consistency
-3. Save original file in a safe location
-4. Verify write by reading back and comparing
+### Always
+1. Read EEPROM twice and compare
+2. Keep original backup in safe location
+3. Verify writes by reading back
