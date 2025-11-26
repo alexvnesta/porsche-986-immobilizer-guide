@@ -292,16 +292,24 @@ Junkyard:   43 41 32 98 58 57 09 82 A4  ("CA2" visible)
 - Your Boxster has all zeros - unclear if this matters
 - **Need:** More samples to determine pattern
 
-### Bytes After PIN (0x1F1-0x1F6 / 0x1FA-0x1FF)
+### ~~Bytes After PIN (0x1F1-0x1F6 / 0x1FA-0x1FF)~~ RESOLVED
+
+**These are the ECU/DME PAIRING CODE!**
+
+Analysis of paired ECU+ACU dumps from the same car confirms these 6 bytes link the ACU to the ECU:
+
 ```
-Boxster:    6D 32 D0 56 D9 78
-Car 198:    00 CD 3A D9 7C 99
-Junkyard:   63 50 EB A3 C8 8D
+2002 ACU (0x1F1):  3D B8 7A 21 E9 94
+2002 ECU (0x1E4):  3D B8 7A 21 E9 00  ← First 5 bytes MATCH!
 ```
-- These 6 bytes after each PIN copy differ per module
-- Could be: checksums, immobilizer secret, DME pairing code
-- They repeat (0x1F1 = 0x1FA pattern)
-- **Need:** Determine if these are calculated or independent
+
+| Dump | Pairing Code (0x1F1) | Notes |
+|------|---------------------|-------|
+| Boxster | `6D 32 D0 56 D9 78` | Unique to this car |
+| Car 198 | `00 CD 3A D9 7C 99` | Different car |
+| 2002 M534 | `3D B8 7A 21 E9 94` | Matches ECU dump |
+
+**This is why you can't just swap ACU or ECU modules** - the pairing code must match in both!
 
 ### Counter Values (0x1BB-0x1BC)
 ```
