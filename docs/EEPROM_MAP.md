@@ -236,6 +236,14 @@ Analysis of 4 different EEPROM sources confirms consistent structure:
 2. Keep original backup in safe location
 3. Verify writes by reading back
 
+## References & Sources
+
+- [bdm310/996-Immobilizer](https://github.com/bdm310/996-Immobilizer) - Original reverse engineering (PIN locations, part number decoding)
+- [ABRITES Commander For Porsche 4.1](https://www.abritus72.com/) - OBD unlock data
+- [Digital Kaos Forum](https://www.digital-kaos.co.uk/forums/) - Community unlocks and dumps
+- [Rennlist Forums](https://rennlist.com/forums/) - PIN offset confirmation
+- [M534PSI Performance YouTube](https://www.youtube.com/) - Byte-swapping explanation
+
 ## Multi-Dump Analysis (8 ACU + 2 ECU dumps)
 
 ### ACU Dump Summary

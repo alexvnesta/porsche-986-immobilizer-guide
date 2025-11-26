@@ -508,10 +508,13 @@ The 986/996 uses a challenge-response rolling code system. If remote gets too fa
 
 ### Online References
 
-- [bdm310/996-Immobilizer GitHub](https://github.com/bdm310/996-Immobilizer) - Original reverse engineering work
+- [bdm310/996-Immobilizer GitHub](https://github.com/bdm310/996-Immobilizer) - **Original reverse engineering work** (PIN locations, part number decoding, hardware details)
 - [JMG Porsche Alarm Primer](https://www.jmgporsche.co.uk/index.php/sales-maintenance/item/234-996-986-alarm-primer) - Comprehensive technical overview
-- [986 Forum](https://986forum.com) - Community support
+- [Digital Kaos Forum](https://www.digital-kaos.co.uk/forums/) - Locksmith community, OBD unlock help
+- [MHH Auto Forum](https://mhhauto.com/) - EEPROM dumps and immo discussions
+- [RennTech.org](https://www.renntech.org/) - Porsche technical community
 - [Rennlist 996 Forum](https://rennlist.com/forums/996-forum/) - Community support
+- [986 Forum](https://986forum.com) - Boxster community support
 
 ### Service Providers
 
