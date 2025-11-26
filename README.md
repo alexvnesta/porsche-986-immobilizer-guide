@@ -80,9 +80,24 @@ Chip: 93C66 (select 8-bit mode, 512 bytes)
 ### Key Slot Allocation
 
 The M534/M535 has **4 total slots** for keys:
-- Factory default: 3 transponder slots + 2 remote slots
+- Factory default: 3 transponder slots + 2 remote slots (2 remote keys + 1 workshop key)
 - Maximum: 4 of each (transponder and remote)
-- Each remote has its own code card (required for programming)
+- Each remote has its own code card (required for programming radio module, NOT transponder)
+- Ignition lock has a separate code card with TRW identifier
+- **Exception:** M531 (early Boxster) has central locking but NO remote function
+
+### Comfort Functions
+
+When using the remote:
+- **Hold open button** while unlocking → lowers both side windows
+- **Hold close button** while locking → raises both side windows
+- **Seat memory** (if equipped): Driver seat moves to saved position on unlock (3 positions available)
+
+**Seat Memory Troubleshooting:**
+| Symptom | Likely Cause |
+|---------|--------------|
+| Seat goes to wrong position | Radio modules swapped between keys |
+| Seat always moves fully forward | Radio module signal degraded - check module & ACU |
 
 ## EEPROM Structure
 
@@ -534,6 +549,19 @@ This is an anti-theft measure. If someone steals your car and plugs in a diagnos
 ### Rolling Code Out of Sync
 
 The 986/996 uses a challenge-response rolling code system. If remote gets too far out of sync (~40 button presses), it cannot be recovered without reprogramming.
+
+### Resynchronization vs Reprogramming
+
+**These are NOT the same thing!**
+
+| Operation | What It Does | When to Use |
+|-----------|--------------|-------------|
+| **Resync** | Re-introduces an already-paired radio module to ACU | Remote temporarily out of sync |
+| **Reprogram** | Registers NEW transponder + radio module with code card | New key, or module replacement |
+
+**Critical Warning:** Resynchronizing a radio module **without first testing its signal** is strongly discouraged. The ACU may permanently disable the radio module if the signal is faulty.
+
+The transponder and radio module are stored as a **single unit** in each key slot. If the pairing is incorrect (e.g., modules swapped between keys), resync will fail.
 
 ### Remote Locked Out (Play Protection)
 
