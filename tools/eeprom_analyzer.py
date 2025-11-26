@@ -26,13 +26,40 @@ def analyze_part_number(data):
     """Decode the ACU part number from bytes at 0x009."""
     if len(data) < 0x00F:
         return "Unknown (data too short)"
-    
+
     part_bytes = data[0x009:0x00F]
     # Format: 99 66 18 26 00 70 -> 996.618.260.07
+    # Bytes are stored as: [99][66] [18][26] [model_tens][revision]
+    # Where: 99 66 = "996", 18 26 = "618"
+    #        model_tens: 00=260, 20=262
+    #        revision: last two digits (05, 06, 07, etc)
     try:
-        pn = f"{part_bytes[0]:02X}{part_bytes[1]:02X}.{part_bytes[2]:02X}{part_bytes[3]:02X}.{part_bytes[4]:02X}{part_bytes[5]:02X}"
-        # Clean up formatting
-        decoded = f"{int(part_bytes[0]):d}{int(part_bytes[1]):02d}.{int(part_bytes[2]):d}{int(part_bytes[3]):02d}.{int(part_bytes[4]):d}{int(part_bytes[5]):02d}"
+        # First 4 bytes are always 99 66 18 26 for "996.618."
+        # Byte 4: 00 = 260.xx, 20 = 262.xx
+        # Byte 5: revision as hex (00, 05, 06, 07, 30, etc)
+        model_byte = part_bytes[4]
+        rev_byte = part_bytes[5]
+
+        if model_byte == 0x00:
+            model = "260"
+        elif model_byte == 0x20:
+            model = "262"
+        else:
+            model = f"2{model_byte:02X}"
+
+        # Revision: interpret as decimal-ish (70 -> 07, 50 -> 05, 30 -> 03)
+        if rev_byte >= 0x70:
+            rev = f"0{rev_byte - 0x70 + 7}"
+        elif rev_byte >= 0x50:
+            rev = f"0{rev_byte - 0x50 + 5}"
+        elif rev_byte >= 0x30:
+            rev = f"0{rev_byte - 0x30 + 3}"
+        elif rev_byte >= 0x20:
+            rev = f"0{rev_byte - 0x20 + 2}"
+        else:
+            rev = f"{rev_byte:02d}"
+
+        decoded = f"996.618.{model}.{rev}"
         return f"{' '.join(f'{b:02X}' for b in part_bytes)} -> {decoded}"
     except:
         return f"{' '.join(f'{b:02X}' for b in part_bytes)} (decode failed)"

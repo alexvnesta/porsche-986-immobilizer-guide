@@ -3,12 +3,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# EEPROM dumps (personal data)
-*.bin
-*.BIN
-*.dump
-*.DUMP
-
 # Backup files
 *.bak
 *.backup
