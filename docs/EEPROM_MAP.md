@@ -62,26 +62,66 @@ Decoded: 996.618.260.07
          └────────────── Manufacturer (996 = Porsche)
 ```
 
-### OBD Access Control Flags (0x080-0x087)
+### OBD Access Control (0x080-0x0B6)
 
 **This controls whether the module accepts programming via OBD-II diagnostic port.**
 
-| Offset | Locked (Default) | Unlocked | Purpose |
-|--------|------------------|----------|---------|
-| 0x080-0x081 | `00 00` or `55 55` | `F6 0A` | OBD enable flag 1 |
-| 0x082 | `00` | `00` | Separator |
-| 0x083-0x084 | `00 00` or `55 55` | `F6 0A` | OBD enable flag 2 |
-| 0x085-0x087 | `55 75 00` | varies | Additional flags |
+ABRITES Commander modifies **THREE regions** to enable OBD access - not just the flags!
 
-**Firmware check (pseudocode):**
-```c
-if (eeprom[0x80] == 0xF6 && eeprom[0x81] == 0x0A &&
-    eeprom[0x83] == 0xF6 && eeprom[0x84] == 0x0A) {
-    allow_obd_programming = true;
-}
+#### Region 1: OBD Flags (0x080-0x08F)
+
+```
+         0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
+Locked:   00 00 00 55 55 00 50 75 30 50 03 30 00 05 00 00
+Unlocked: F6 0A 00 F6 0A 00 75 00 00 30 30 01 03 02 00 00
+          ^^^^^^^^^^^^^^^^^^    ^^    ^^ ^^ ^^    ^^
 ```
 
-**All 3 dumps analyzed show LOCKED state:** `00 00 55 00 00 55 75 00`
+| Offset | Locked | Unlocked | Purpose |
+|--------|--------|----------|---------|
+| 0x080-0x081 | `00 00` | `F6 0A` | OBD enable flag 1 |
+| 0x083-0x084 | `55 55` | `F6 0A` | OBD enable flag 2 |
+| 0x086 | `50` | `75` | Access mode |
+| 0x088-0x08B | `30 50 03 30` | `00 30 30 01` | Config flags |
+| 0x08D | `05` | `02` | Unknown flag |
+
+#### Region 2: Authentication Values (0x0A0-0x0AF)
+
+```
+         0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F
+Locked:   00 00 7A 7A 75 7A 75 73 75 75 7A 7A 00 00 00 00
+Unlocked: 00 00 8B 3B 3B 3B 3B EB 3B 3B E6 3B 64 A0 A0 3D
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ^^^^^^^^^^^
+```
+
+These bytes appear to be authentication/challenge-response bypass values.
+
+#### Region 3: Additional Unlock Data (0x0B0-0x0B6)
+
+```
+         0  1  2  3  4  5  6
+Locked:   00 00 00 00 00 00 4C
+Unlocked: 3D 85 E5 E5 E5 63 0C
+          ^^^^^^^^^^^^^^^^^^^^
+```
+
+Note: Bytes 0x0B7+ (transponder IDs) are NOT modified.
+
+#### Complete OBD Unlock Patch
+
+To unlock OBD access, modify these 33 bytes:
+
+```
+0x080: F6 0A 00 F6 0A 00 75 00 00 30 30 01 03 02 00 00
+0x0A0: 00 00 8B 3B 3B 3B 3B EB 3B 3B E6 3B 64 A0 A0 3D
+0x0B0: 3D 85 E5 E5 E5 63 0C
+```
+
+**WARNING:** The 0x0A0 and 0x0B0 values shown above may be module-specific.
+The `F6 0A` flags at 0x080 are consistent, but the authentication bypass
+values might need to be calculated per-module by ABRITES.
+
+*Data source: ABRITES Commander For Porsche 4.1 (www.abritus72.com)*
 
 ### Key Slot Structure (0x0BA-0x154)
 
@@ -195,3 +235,54 @@ Analysis of 4 different EEPROM sources confirms consistent structure:
 1. Read EEPROM twice and compare
 2. Keep original backup in safe location
 3. Verify writes by reading back
+
+## Known Unknowns
+
+Areas that are not fully understood yet:
+
+### Header Region (0x000-0x008)
+```
+Boxster:    00 00 00 00 00 00 00 00 00  (empty)
+Car 198:    41 41 32 99 39 58 09 80 E3  ("AA2" visible)
+Junkyard:   43 41 32 98 58 57 09 82 A4  ("CA2" visible)
+```
+- Some modules have ASCII characters that could be partial VIN
+- Your Boxster has all zeros - unclear if this matters
+- **Need:** More samples to determine pattern
+
+### Bytes After PIN (0x1F1-0x1F6 / 0x1FA-0x1FF)
+```
+Boxster:    6D 32 D0 56 D9 78
+Car 198:    00 CD 3A D9 7C 99
+Junkyard:   63 50 EB A3 C8 8D
+```
+- These 6 bytes after each PIN copy differ per module
+- Could be: checksums, immobilizer secret, DME pairing code
+- They repeat (0x1F1 = 0x1FA pattern)
+- **Need:** Determine if these are calculated or independent
+
+### Counter Values (0x1BB-0x1BC)
+```
+Boxster:    31 A6
+Car 198:    7D 87
+Junkyard:   19 B2
+```
+- Follows the `B2 22 D4` sync pattern
+- Different on each module
+- **Need:** Before/after dump to see what increments these
+
+### OBD Unlock Authentication (0x0A0-0x0B6)
+- ABRITES modifies these along with the `F6 0A` flags
+- Values may be calculated per-module or could be universal
+- **Need:** Multiple unlock examples to determine if values are fixed
+
+### Radio Code Full Length
+- Barcodes may show 4 bytes (8 hex chars) or 12 bytes (24 hex chars)
+- EEPROM stores more than 4 bytes per slot
+- **Need:** Physical barcode photo to confirm format
+
+### Checksums
+- No obvious checksum algorithm identified
+- Remote code modifications work without updating other bytes
+- Configuration blocks mirror each other (0x020 = 0x050)
+- **Need:** Test if arbitrary modifications cause rejection

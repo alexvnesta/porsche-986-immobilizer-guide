@@ -396,37 +396,45 @@ ABRITES can:
 
 Some ACUs have OBD programming access disabled. This is an anti-theft feature - even with the correct PIN, the module refuses programming commands over OBD-II.
 
-#### OBD Access Control Flags (0x080-0x084)
+#### OBD Unlock - Full Picture
 
-The module checks bytes at offset 0x80-0x84 on startup:
+ABRITES Commander modifies **THREE regions** to enable OBD access, not just the flags:
 
-| State | Bytes at 0x80-0x81 | Bytes at 0x83-0x84 | Result |
-|-------|-------------------|-------------------|--------|
-| **Locked** | `00 00` or `55 55` | `00 00` or `55 55` | OBD programming **blocked** |
-| **Unlocked** | `F6 0A` | `F6 0A` | OBD programming **allowed** |
+| Region | Offset | Bytes Changed |
+|--------|--------|---------------|
+| OBD Flags | 0x080-0x08F | 16 bytes |
+| Auth Bypass | 0x0A0-0x0AF | 16 bytes |
+| Unlock Data | 0x0B0-0x0B6 | 7 bytes |
 
-The firmware logic is essentially:
-```c
-if (eeprom[0x80] == 0xF6 && eeprom[0x81] == 0x0A &&
-    eeprom[0x83] == 0xF6 && eeprom[0x84] == 0x0A) {
-    allow_obd_programming = true;
-}
+#### Region 1: OBD Flags (0x080-0x08F)
+
+```
+Locked:   00 00 00 55 55 00 50 75 30 50 03 30 00 05 00 00
+Unlocked: F6 0A 00 F6 0A 00 75 00 00 30 30 01 03 02 00 00
+          ^^ ^^ ^^ ^^ ^^    ^^    ^^ ^^ ^^ ^^    ^^
 ```
 
-The flag is stored twice for redundancy - if one copy gets corrupted, the check fails.
+The `F6 0A` magic number at 0x080 and 0x083 is the primary enable flag.
 
-#### To Unlock OBD Access:
+#### Region 2: Authentication Bypass (0x0A0-0x0AF)
 
-1. Read EEPROM from ACU
-2. Modify bytes at 0x80-0x84:
-   ```
-   Original: 00 00 00 55 55 ...  (or similar locked state)
-   Modified: F6 0A 00 F6 0A ...
-   ```
-3. Write modified EEPROM back to ACU
-4. PIWIS/diagnostic tools can now program keys and remotes
+```
+Locked:   00 00 7A 7A 75 7A 75 73 75 75 7A 7A 00 00 00 00
+Unlocked: 00 00 8B 3B 3B 3B 3B EB 3B 3B E6 3B 64 A0 A0 3D
+```
 
-**Note:** The unlock bytes `F6 0A` are written in raw format (no byte-swapping needed).
+#### Region 3: Additional Unlock (0x0B0-0x0B6)
+
+```
+Locked:   00 00 00 00 00 00 4C
+Unlocked: 3D 85 E5 E5 E5 63 0C
+```
+
+**WARNING:** The 0x0A0 and 0x0B0 values may be module-specific or calculated by ABRITES.
+The `F6 0A` flags appear consistent, but blindly copying the auth bypass values
+from one module to another may not work.
+
+*Data source: ABRITES Commander For Porsche 4.1*
 
 #### Why This Exists
 
