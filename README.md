@@ -649,20 +649,19 @@ Water causes corrosion on the PCB, leading to the failures listed above.
 ## File Structure
 
 ```
-├── README.md                 # This file
+├── README.md                 # This file - overview and quick reference
 ├── docs/
-│   ├── EEPROM_MAP.md        # Detailed EEPROM memory map
+│   ├── EEPROM_MAP.md        # Detailed EEPROM memory map & patterns
 │   ├── ANALYSIS.md          # ECU/ACU pairing code analysis
 │   ├── WIRING.md            # ACU connector pinout and wiring
 │   └── PROCEDURES.md        # Step-by-step programming procedures
 ├── tools/
 │   ├── eeprom_analyzer.py   # Analyze and extract codes from dumps
 │   └── program_remote.py    # Write remote codes to EEPROM
-├── dumps/                   # Sample EEPROM dumps (ACU & ECU)
-│   ├── acu/                 # Alarm Control Unit dumps
-│   └── ecu/                 # Engine Control Unit dumps
-└── examples/
-    └── reference_patterns.txt   # Reference patterns
+└── dumps/                   # EEPROM dump organization (files gitignored)
+    ├── acu/                 # Alarm Control Unit dumps
+    ├── ecu/                 # Engine Control Unit dumps
+    └── README.md            # Dump collection documentation
 ```
 
 ## Contributing

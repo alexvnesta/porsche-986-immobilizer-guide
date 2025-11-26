@@ -378,3 +378,33 @@ From label on new remote PCB (996.637.244.17)
 - Remote code modifications work without updating other bytes
 - Configuration blocks mirror each other (0x020 = 0x050)
 - **Need:** Test if arbitrary modifications cause rejection
+
+## Quick Reference Patterns
+
+### Empty Remote Slot
+```
+FF FF FF FF FF FF FF FF B7 FF FF FF FF FF 06 FF
+                        ^^              ^^
+                        Empty markers (always present)
+```
+
+### Programmed Remote Slot
+```
+40 05 90 50 23 6E 31 7F 29 18 D8 21 ...
+|<-------- 12-byte barcode code -------->|
+```
+
+### Valid Header Structure
+```
+0000: 00 00 00 00 00 00 00 00 00 99 66 18 26 00 70 00
+                                ^^^^^^^^^^^^^^^^^^
+                                Part number at 0x009
+```
+
+### Corruption Indicators
+| Pattern | Meaning |
+|---------|---------|
+| All `FF` | EEPROM erased |
+| All `00` | Data corruption |
+| PIN mismatch (0x1EE ≠ 0x1F7) | Corruption or failed write |
+| Config mismatch (0x020 ≠ 0x050) | Unusual - investigate |
