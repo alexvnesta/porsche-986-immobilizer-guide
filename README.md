@@ -17,22 +17,40 @@ This information is provided for educational purposes and for owners working on 
 - [Troubleshooting](#troubleshooting)
 - [Resources](#resources)
 
-## Quick EEPROM Reference
+## Quick EEPROM Reference (512 bytes)
 
 ```
-Offset   What                    Example
-──────────────────────────────────────────────────────
-0x009    Part Number             99 66 18 26 00 70  (= 996.618.260.07)
-0x080    OBD Unlock Flag         F6 0A = unlocked, 00 00 = locked
-0x0BA    Transponder IDs         4 keys × ~5 bytes
-0x100    Remote Slot 1           12 bytes (from key barcode)
-0x10C    Remote Slot 2           12 bytes
-0x118    Remote Slot 3           12 bytes
-0x124    Remote Slot 4           12 bytes
-0x1EE    PIN Code                DC 4E 40  (3 bytes, also at 0x1F7)
-0x1F1    ECU Pairing             6D 32 D0 56 D9 78  (6 bytes)
-──────────────────────────────────────────────────────
-Empty remote slot = FF FF FF FF FF FF FF FF B7 FF FF FF
+     0x000 ┌────────────────────────────────┐
+           │  Header                        │
+     0x009 │  Part Number                   │
+           │  Vehicle Config                │
+     0x020 ├────────────────────────────────┤
+           │  Config Block A                │
+     0x050 ├────────────────────────────────┤
+           │  Config Block B (mirror)       │
+     0x080 ├────────────────────────────────┤
+           │  ★ OBD FLAGS ★                 │  ← F6 0A = unlocked
+     0x0A0 ├────────────────────────────────┤
+           │  Auth / Key Sync Data          │
+     0x0BA ├────────────────────────────────┤
+           │  ★ TRANSPONDER IDs ★           │  ← engine start
+     0x100 ├────────────────────────────────┤
+           │  ★ REMOTE SLOT 1 ★             │  ← lock/unlock
+     0x10C │  ★ REMOTE SLOT 2 ★             │
+     0x118 │  ★ REMOTE SLOT 3 ★             │
+     0x124 │  ★ REMOTE SLOT 4 ★             │
+     0x160 ├────────────────────────────────┤
+           │  (unused)                      │
+     0x1B0 ├────────────────────────────────┤
+           │  Counter / Sync                │
+     0x1C0 ├────────────────────────────────┤
+           │  (unused)                      │
+     0x1EE ├────────────────────────────────┤
+           │  ★ PIN CODE ★  (3 bytes)       │  ← key learning code
+     0x1F1 │  ★ ECU PAIRING ★  (6 bytes)    │  ← links ACU to ECU
+     0x1F7 │  PIN (backup)                  │
+     0x1FA │  ECU Pairing (backup)          │
+     0x200 └────────────────────────────────┘
 ```
 
 > **Need more detail?** See [docs/EEPROM_MAP.md](docs/EEPROM_MAP.md)
