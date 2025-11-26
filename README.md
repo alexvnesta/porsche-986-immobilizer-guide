@@ -591,6 +591,35 @@ After ~120 hours (5 days) without ignition activation, the ACU disables the RF r
 
 If NO keys start the car (not just remote, but turning ignition), this indicates ACU failure - the transponder recognition circuit has failed. Requires ACU repair or replacement.
 
+## Common ACU Failures (Repairable)
+
+The M534/M535 alarm control units can develop various faults, most of which are repairable:
+
+| Symptom | Likely Cause |
+|---------|--------------|
+| **No PIWIS connection (W-Line/K-Line)** | Communication circuit failure - car won't start, transponder not recognized |
+| **One/both doors won't lock/unlock** | Central locking driver circuit failure |
+| **Door immediately reopens after locking** | Latch sensor or driver circuit issue |
+| **Fuel filler flap won't open/close** | Fuel flap circuit failure |
+| **Alarm horn doesn't sound** | Horn driver circuit failure |
+| **Turn signals don't flash on lock/unlock** | Indicator circuit failure |
+| **Seat always moves fully forward on unlock** | Radio module signal degraded or ACU memory corruption |
+| **ACU never enters sleep mode (battery drain)** | Power management circuit failure (should sleep after ~120 hours) |
+| **ACU incorrectly coded** | Software/EEPROM configuration issue |
+
+### ACU Location
+
+The alarm control unit (M531/M534/M535) is located **under the driver's seat** in the 986 and 996.
+
+### Water Damage
+
+Common cause of ACU failure is water intrusion from:
+- Convertible top seal leaks (986 Boxster)
+- Clogged drain channels
+- A/C condensation
+
+Water causes corrosion on the PCB, leading to the failures listed above.
+
 ## Resources
 
 ### Online References
