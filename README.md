@@ -85,6 +85,15 @@ python3 tools/eeprom_analyzer.py dump1.bin --compare dump2.bin
 
 # Program a remote code into a dump
 python3 tools/program_remote.py original.bin modified.bin 1 <24-char-barcode>
+
+# Check OBD lock status
+python3 tools/obd_unlock.py dump.bin --check
+
+# Unlock OBD access (enable key programming via diagnostic port)
+python3 tools/obd_unlock.py locked.bin unlocked.bin
+
+# Re-lock OBD access (restore anti-theft protection)
+python3 tools/obd_unlock.py unlocked.bin locked.bin --lock
 ```
 
 ## Sample Dumps
