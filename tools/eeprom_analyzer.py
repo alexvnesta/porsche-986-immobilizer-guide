@@ -1,16 +1,24 @@
 #!/usr/bin/env python3
 """
 Porsche 986/996 ACU EEPROM Analyzer
-Extracts and displays all known codes and data from a 93LC66 EEPROM dump.
+Extracts and displays all known codes, transponder keys, remote fobs, and dual-bank
+redundancy status from a 93LC66 EEPROM dump.
 
 Usage:
     python3 eeprom_analyzer.py <eeprom.bin> [--compare <other.bin>]
 
-Repository: https://github.com/YOUR_USERNAME/porsche-986-immobilizer-guide
+Repository: https://github.com/alexvnesta/porsche-986-immobilizer-guide
 """
 
 import sys
 import argparse
+
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
 
 def format_hex(data, start_offset=0, bytes_per_line=16):
     """Format bytes as a hex dump with ASCII representation."""
@@ -23,50 +31,22 @@ def format_hex(data, start_offset=0, bytes_per_line=16):
 
 
 def analyze_part_number(data):
-    """Decode the ACU part number from bytes at 0x009."""
+    """Decode the ACU part number from packed BCD bytes at 0x009..0x00E."""
     if len(data) < 0x00F:
         return "Unknown (data too short)"
 
     part_bytes = data[0x009:0x00F]
-    # Format: 99 66 18 26 00 70 -> 996.618.260.07
-    # Bytes are stored as: [99][66] [18][26] [model_tens][revision]
-    # Where: 99 66 = "996", 18 26 = "618"
-    #        model_tens: 00=260, 20=262
-    #        revision: last two digits (05, 06, 07, etc)
+    pn_hex = part_bytes.hex()
+    # 12 nibbles packed BCD: e.g. 996618260070 -> 996.618.260.07
     try:
-        # First 4 bytes are always 99 66 18 26 for "996.618."
-        # Byte 4: 00 = 260.xx, 20 = 262.xx
-        # Byte 5: revision as hex (00, 05, 06, 07, 30, etc)
-        model_byte = part_bytes[4]
-        rev_byte = part_bytes[5]
-
-        if model_byte == 0x00:
-            model = "260"
-        elif model_byte == 0x20:
-            model = "262"
-        else:
-            model = f"2{model_byte:02X}"
-
-        # Revision: interpret as decimal-ish (70 -> 07, 50 -> 05, 30 -> 03)
-        if rev_byte >= 0x70:
-            rev = f"0{rev_byte - 0x70 + 7}"
-        elif rev_byte >= 0x50:
-            rev = f"0{rev_byte - 0x50 + 5}"
-        elif rev_byte >= 0x30:
-            rev = f"0{rev_byte - 0x30 + 3}"
-        elif rev_byte >= 0x20:
-            rev = f"0{rev_byte - 0x20 + 2}"
-        else:
-            rev = f"{rev_byte:02d}"
-
-        decoded = f"996.618.{model}.{rev}"
-        return f"{' '.join(f'{b:02X}' for b in part_bytes)} -> {decoded}"
-    except:
+        formatted = f"{pn_hex[0:3]}.{pn_hex[3:6]}.{pn_hex[6:9]}.{pn_hex[9:11]}"
+        return f"{' '.join(f'{b:02X}' for b in part_bytes)} -> {formatted}"
+    except Exception:
         return f"{' '.join(f'{b:02X}' for b in part_bytes)} (decode failed)"
 
 
 def analyze_pin(data):
-    """Extract PIN/Key Learning Code from 0x1EE and 0x1F7."""
+    """Extract PIN/Key Learning Code from Bank A (0x1EE) and Bank B (0x1F7)."""
     if len(data) < 0x1FA:
         return None, None, False
 
@@ -78,7 +58,7 @@ def analyze_pin(data):
 
 
 def analyze_ecu_pairing(data):
-    """Extract ECU pairing code from 0x1F1 and 0x1FA."""
+    """Extract 6-byte ECU pairing code from Bank A (0x1F1) and Bank B (0x1FA)."""
     if len(data) < 0x200:
         return None, None, False
 
@@ -97,7 +77,6 @@ def analyze_obd_status(data):
     # Check for the F6 0A unlock pattern at 0x080 and 0x083
     flag1 = data[0x080:0x082]
     flag2 = data[0x083:0x085]
-
     unlocked_pattern = bytes([0xF6, 0x0A])
 
     if flag1 == unlocked_pattern and flag2 == unlocked_pattern:
@@ -108,36 +87,76 @@ def analyze_obd_status(data):
         return f"UNKNOWN (flags: {flag1.hex()} / {flag2.hex()})"
 
 
+def analyze_transponders(data):
+    """Analyze the 4 Megamos ID48 transponder slots (Bank A vs Bank B mirror)."""
+    if len(data) < 0x0E2:
+        return []
+
+    slots = []
+    for slot in range(4):
+        off_a = 0x0BA + (slot * 5)
+        off_b = 0x0CE + (slot * 5)
+
+        id_a = data[off_a:off_a + 4]
+        sep_a = data[off_a + 4]
+        id_b = data[off_b:off_b + 4]
+        sep_b = data[off_b + 4]
+
+        is_empty = (id_a == bytes([0xFF, 0xFF, 0xFF, 0xFF]) or id_a == bytes([0x00, 0x00, 0x00, 0x00]))
+        matches = (id_a == id_b)
+
+        slots.append({
+            'slot': slot + 1,
+            'offset_a': off_a,
+            'id_a': id_a.hex().upper(),
+            'id_b': id_b.hex().upper(),
+            'sep_a': f"{sep_a:02X}",
+            'empty': is_empty,
+            'matches': matches
+        })
+    return slots
+
+
 def analyze_remote_slot(data, slot_num):
-    """Analyze a remote control slot."""
-    offsets = {1: 0x100, 2: 0x10C, 3: 0x118, 4: 0x124}
-    
-    if slot_num not in offsets:
-        return None, "Invalid slot"
-    
-    offset = offsets[slot_num]
-    if len(data) < offset + 12:
-        return None, "Data too short"
-    
-    slot_data = data[offset:offset+12]
-    
-    # Check if slot is empty/unprogrammed
-    unique_vals = set(slot_data)
-    if unique_vals <= {0xFF, 0xB7, 0x06}:
-        return slot_data, "EMPTY (unprogrammed pattern)"
-    elif all(b == 0x00 for b in slot_data):
-        return slot_data, "EMPTY (all zeros)"
-    elif all(b == 0xFF for b in slot_data):
-        return slot_data, "EMPTY (all 0xFF)"
+    """Analyze a remote control slot (30 bytes per slot: 21B Bank A + 9B Bank B mirror)."""
+    if slot_num not in [1, 2, 3, 4]:
+        return None, "Invalid slot", False
+
+    # Base offsets: Slot 1: 0x0E2, Slot 2: 0x100, Slot 3: 0x11E, Slot 4: 0x13C
+    base_a = 0x0E2 + (slot_num - 1) * 30
+    base_b = base_a + 21
+
+    if len(data) < base_a + 30:
+        return None, "Data too short", False
+
+    bank_a_record = data[base_a:base_a + 21]
+    bank_b_record = data[base_b:base_b + 9]
+
+    rf_id = bank_a_record[0:4]
+    is_empty = (rf_id == bytes([0xFF, 0xFF, 0xFF, 0xFF]) or rf_id == bytes([0x00, 0x00, 0x00, 0x00]))
+    mirror_match = (bank_a_record[0:9] == bank_b_record)
+
+    if is_empty:
+        status = "EMPTY"
+    elif mirror_match:
+        status = "PROGRAMMED (Bank Mirror Valid)"
     else:
-        return slot_data, "PROGRAMMED"
+        status = "DESYNCHRONIZED (Bank Mirror Mismatch)"
+
+    slot_info = {
+        'rf_id': rf_id.hex().upper(),
+        'base_a': base_a,
+        'base_b': base_b,
+        'bank_a_hex': bank_a_record.hex().upper(),
+        'bank_b_hex': bank_b_record.hex().upper(),
+    }
+    return slot_info, status, mirror_match
 
 
 def analyze_sync_region(data):
     """Analyze the counter/sync region at 0x1B0."""
     if len(data) < 0x1C0:
         return None
-    
     return data[0x1B0:0x1C0]
 
 
@@ -145,25 +164,25 @@ def print_analysis(filepath):
     """Main analysis function."""
     with open(filepath, 'rb') as f:
         data = f.read()
-    
+
     print("=" * 70)
     print("PORSCHE 986/996 ACU EEPROM ANALYSIS")
     print("=" * 70)
     print(f"File: {filepath}")
     print(f"Size: {len(data)} bytes")
-    
+
     if len(data) != 512:
         print(f"⚠ WARNING: Expected 512 bytes for 93LC66, got {len(data)}")
-    
+
     print("=" * 70)
-    
+
     # Part Number
     print("\n[PART NUMBER] (0x009-0x00E)")
     print("-" * 40)
     print(f"  {analyze_part_number(data)}")
-    
+
     # OBD Status
-    print("\n[OBD PROGRAMMING STATUS]")
+    print("\n[OBD PROGRAMMING STATUS] (0x080)")
     print("-" * 40)
     obd_status = analyze_obd_status(data)
     print(f"  {obd_status}")
@@ -173,47 +192,57 @@ def print_analysis(filepath):
     print("-" * 40)
     pin1, pin2, match = analyze_pin(data)
     if pin1:
-        print(f"  Location 0x1EE: {' '.join(f'{b:02X}' for b in pin1)}")
-        print(f"  Location 0x1F7: {' '.join(f'{b:02X}' for b in pin2)}")
+        print(f"  Bank A (0x1EE): {' '.join(f'{b:02X}' for b in pin1)}")
+        print(f"  Bank B (0x1F7): {' '.join(f'{b:02X}' for b in pin2)}")
         if match:
-            print(f"\n  ✓ PIN codes match")
-            print(f"\n  >>> YOUR PIN: {' '.join(f'{b:02X}' for b in pin1)} <<<")
+            print(f"  ✓ PIN codes match: {' '.join(f'{b:02X}' for b in pin1)}")
         else:
-            print(f"\n  ⚠ WARNING: PIN codes do NOT match!")
+            print("  ⚠ WARNING: PIN codes do NOT match!")
 
     # ECU Pairing Code
-    print("\n[ECU PAIRING CODE (Alarm Learning Code)]")
+    print("\n[ECU PAIRING CODE (W-Lead Secret)]")
     print("-" * 40)
     pairing1, pairing2, pairing_match = analyze_ecu_pairing(data)
     if pairing1:
-        print(f"  Location 0x1F1: {' '.join(f'{b:02X}' for b in pairing1)}")
-        print(f"  Location 0x1FA: {' '.join(f'{b:02X}' for b in pairing2)}")
+        print(f"  Bank A (0x1F1): {' '.join(f'{b:02X}' for b in pairing1)}")
+        print(f"  Bank B (0x1FA): {' '.join(f'{b:02X}' for b in pairing2)}")
         if pairing_match:
-            print(f"\n  ✓ Pairing codes match")
-            print(f"\n  >>> ECU PAIRING: {' '.join(f'{b:02X}' for b in pairing1)} <<<")
+            print(f"  ✓ Pairing codes match: {' '.join(f'{b:02X}' for b in pairing1)}")
         else:
-            print(f"\n  ⚠ WARNING: Pairing codes do NOT match!")
-    
+            print("  ⚠ WARNING: Pairing codes do NOT match!")
+
+    # Transponders
+    print("\n[TRANSPONDER KEYS (Megamos ID48)] (0x0BA-0x0E1)")
+    print("-" * 40)
+    transponders = analyze_transponders(data)
+    for t in transponders:
+        if t['empty']:
+            print(f"  Slot {t['slot']} (0x{t['offset_a']:03X}): [Empty slot] (Separator: 0x{t['sep_a']})")
+        else:
+            status = "✓ Bank A == Bank B" if t['matches'] else "⚠ Bank mismatch"
+            print(f"  Slot {t['slot']} (0x{t['offset_a']:03X}): ID = {t['id_a']} (Sep: 0x{t['sep_a']}) [{status}]")
+
     # Remote Slots
-    print("\n[REMOTE CONTROL SLOTS] (0x100-0x13F)")
+    print("\n[REMOTE CONTROL SLOTS] (0x0E2-0x159, 30 bytes per slot)")
     print("-" * 40)
     for slot in range(1, 5):
-        slot_data, status = analyze_remote_slot(data, slot)
-        if slot_data:
-            hex_str = ' '.join(f'{b:02X}' for b in slot_data)
-            print(f"  Slot {slot}: {status}")
-            print(f"         {hex_str}")
-    
+        slot_info, status, mirror_match = analyze_remote_slot(data, slot)
+        if slot_info:
+            print(f"  Slot {slot} (0x{slot_info['base_a']:03X}): {status}")
+            if "PROGRAMMED" in status:
+                print(f"         Radio ID: {slot_info['rf_id']}")
+                print(f"         Bank A (21B): {slot_info['bank_a_hex']}")
+                print(f"         Bank B (9B):  {slot_info['bank_b_hex']}")
+
     # Sync Region
     print("\n[COUNTER/SYNC REGION] (0x1B0-0x1BF)")
     print("-" * 40)
     sync_data = analyze_sync_region(data)
     if sync_data:
         print(f"  {' '.join(f'{b:02X}' for b in sync_data)}")
-        # Check for known sync pattern
         if bytes([0xB2, 0x22, 0xD4]) in sync_data:
             print("  ✓ Found sync pattern: B2 22 D4")
-    
+
     # Configuration blocks
     print("\n[CONFIGURATION COMPARISON]")
     print("-" * 40)
@@ -224,31 +253,7 @@ def print_analysis(filepath):
             print("  ✓ Config blocks at 0x020 and 0x050 match (normal)")
         else:
             print("  ⚠ Config blocks at 0x020 and 0x050 differ (unusual)")
-    
-    # Key data region
-    print("\n[KEY DATA REGION] (0x090-0x0AF)")
-    print("-" * 40)
-    if len(data) >= 0x0B0:
-        print(format_hex(data[0x090:0x0B0], 0x090))
-    
-    # Transponder region
-    print("\n[TRANSPONDER REGION] (0x0B0-0x0DF)")
-    print("-" * 40)
-    if len(data) >= 0x0E0:
-        print(format_hex(data[0x0B0:0x0E0], 0x0B0))
-    
-    # PIN region detail
-    print("\n[PIN REGION DETAIL] (0x1E0-0x1FF)")
-    print("-" * 40)
-    if len(data) >= 0x200:
-        print(format_hex(data[0x1E0:0x200], 0x1E0))
-    
-    # Full dump option
-    print("\n" + "=" * 70)
-    print("FULL HEX DUMP")
-    print("=" * 70)
-    print(format_hex(data))
-    
+
     return data
 
 
@@ -258,32 +263,31 @@ def compare_dumps(file1, file2):
         data1 = f.read()
     with open(file2, 'rb') as f:
         data2 = f.read()
-    
+
     print("\n" + "=" * 70)
     print("EEPROM COMPARISON")
     print("=" * 70)
     print(f"File 1: {file1} ({len(data1)} bytes)")
     print(f"File 2: {file2} ({len(data2)} bytes)")
     print("-" * 70)
-    
+
     min_len = min(len(data1), len(data2))
     differences = []
-    
+
     for i in range(min_len):
         if data1[i] != data2[i]:
             differences.append((i, data1[i], data2[i]))
-    
+
     if len(data1) != len(data2):
-        print(f"⚠ Files have different sizes!")
-    
+        print("⚠ Files have different sizes!")
+
     print(f"\nTotal differences: {len(differences)} bytes")
-    
+
     if differences:
         print("\nOffset   File1  File2  Region")
         print("-" * 50)
-        
+
         for offset, b1, b2 in differences[:100]:
-            # Determine region
             if 0x009 <= offset <= 0x00E:
                 region = "Part Number"
             elif 0x080 <= offset <= 0x08F:
@@ -292,7 +296,11 @@ def compare_dumps(file1, file2):
                 region = "Auth Bypass ★"
             elif 0x0B0 <= offset <= 0x0B6:
                 region = "Unlock Data ★"
-            elif 0x100 <= offset <= 0x15F:
+            elif 0x0BA <= offset <= 0x0CD:
+                region = "Transponder Bank A"
+            elif 0x0CE <= offset <= 0x0E1:
+                region = "Transponder Bank B"
+            elif 0x0E2 <= offset <= 0x159:
                 region = "Remote Slots"
             elif 0x1EE <= offset <= 0x1F0 or 0x1F7 <= offset <= 0x1F9:
                 region = "PIN Code"
@@ -300,15 +308,11 @@ def compare_dumps(file1, file2):
                 region = "ECU Pairing"
             elif 0x1B0 <= offset <= 0x1BF:
                 region = "Sync Region"
-            elif 0x090 <= offset <= 0x09F:
-                region = "Key Data"
-            elif 0x0B7 <= offset <= 0x0FF:
-                region = "Transponder"
             else:
                 region = ""
-            
+
             print(f"0x{offset:04X}   0x{b1:02X}   0x{b2:02X}   {region}")
-        
+
         if len(differences) > 100:
             print(f"... and {len(differences) - 100} more differences")
     else:
@@ -322,15 +326,13 @@ def main():
     )
     parser.add_argument('eeprom', help='EEPROM dump file (512 bytes)')
     parser.add_argument('--compare', '-c', help='Compare with another EEPROM dump')
-    
+
     args = parser.parse_args()
-    
+
     try:
         print_analysis(args.eeprom)
-        
         if args.compare:
             compare_dumps(args.eeprom, args.compare)
-            
     except FileNotFoundError as e:
         print(f"Error: File not found - {e.filename}")
         sys.exit(1)
